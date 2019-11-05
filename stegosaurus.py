@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import binascii
 import logging
 import os
 
@@ -9,9 +10,7 @@ import numpy as np
 from PIL import Image
 
 log = logging.getLogger(__name__)
-coloredlogs.install(
-    level="INFO", fmt="%(message)s", logger=log
-)
+coloredlogs.install(level="INFO", fmt="%(message)s", logger=log)
 
 
 def open_image(image_path: str) -> Image:
@@ -102,31 +101,28 @@ def get_common_pixels(image: Image, n: int = 5) -> list:
     return top_five
 
 
-def int_to_bin(rgb: tuple) -> tuple:
+def str_to_bin(data: str, encoding="utf-8", errors="surrogatepass") -> str:
     """
-    Convert an integer tuple to a binary (string) tuple.
-    :param rgb: An integer tuple (e.g. (220, 110, 96))
-    :return: A string tuple (e.g. ("00101010", "11101011", "00010110"))
+    Convert an ASCII string to binary.
+    :param data: string to convert
+    :return: binary string (e.g. "10010001100101110110011011001101111")
     """
-    r, g, b = rgb
-    return ('{0:08b}'.format(r),
-            '{0:08b}'.format(g),
-            '{0:08b}'.format(b))
+    log.debug(f"Attempting to convert {data} to binary...")
+    bits = bin(int.from_bytes(data.encode(encoding, errors), "big"))[2:]
+    binary = bits.zfill(8 * ((len(bits) + 7) // 8))
+    log.debug(f"{data} = {binary}")
+    return binary
 
 
-def bin_to_int(rgb: tuple) -> tuple:
-    """
-    Convert a binary (string) tuple to an integer tuple.
-    :param rgb: A string tuple (e.g. ("00101010", "11101011", "00010110"))
-    :return: Return an int tuple (e.g. (220, 110, 96))
-    """
-    r, g, b = rgb
-    return (int(r, 2),
-            int(g, 2),
-            int(b, 2))
+def bin_to_str(bits, encoding="utf-8", errors="surrogatepass"):
+    log.debug(f"Attempting to convert {bits} to UTF8...")
+    n = int(bits, 2)
+    data = n.to_bytes((n.bit_length() + 7) // 8, "big").decode(encoding, errors) or "\0"
+    log.debug(f"{bits} = {data}")
+    return data
 
 
-def encode_message(image: Image, data:str) -> Image:
+def encode_message(image: Image, data: str) -> Image:
     """
     Encode a message into an image.
     :param image: image to be encoded into
@@ -149,8 +145,11 @@ def encode_message(image: Image, data:str) -> Image:
                     i += 1
 
             # set pixel in new image
-            new_image.putpixel((x,y), tuple(pixel))
+            new_image.putpixel((x, y), tuple(pixel))
 
+    log.debug(f"Writing data length {len(data)} to pixel (0,0)...")
+
+    new_image.putpixel((image.width - 1, image.height - 1), tuple([len(data), 0, 0]))
     return new_image
 
 
@@ -161,33 +160,35 @@ def decode_message(image: Image) -> str:
     :return: string extracted from the image
     """
     extracted_bin = []
+    index_pixel = list(image.getpixel((image.width - 1, image.height - 1)))
+    data_length = index_pixel[0]
+    log.debug(f"Data length recorded at pixel (0, 0) is {data_length}.")
 
     width, height = image.size
     for x in range(0, width):
         for y in range(0, height):
             pixel = list(image.getpixel((x, y)))
 
-            for n in range(0,3):
-                extracted_bin.append(pixel[n] & 1)
+            for n in range(0, 3):
+                if len(extracted_bin) < data_length:
+                    extracted_bin.append(pixel[n] & 1)
 
     data = "".join([str(x) for x in extracted_bin])
+    log.debug(f"Extracted binary: {data}")
+
     return data
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Hide messages within image files.")
     group = parser.add_mutually_exclusive_group()
-   
+
     group.add_argument("-e", "--encode", action="store_true", help="Encode a string.")
     group.add_argument("-d", "--decode", action="store_true", help="Decode an image.")
-   
+
     parser.add_argument("-s", "--source", type=str, required=True, help="Source image")
-    parser.add_argument(
-        "-o", "--out", type=str, default=None, help="Destination image"
-    )
-    parser.add_argument(
-        "--data", type=str, help="String to hide"
-    )
+    parser.add_argument("-o", "--out", type=str, default=None, help="Destination image")
+    parser.add_argument("--data", type=str, help="String to hide")
     parser.add_argument(
         "-v",
         "--verbose",
@@ -198,11 +199,14 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    if not args.encode and not args.decode:
+        log.error("You must choose to encode or decode an image. Exiting...")
+        parser.print_help()
+        exit(1)
+
     if args.verbose:
         coloredlogs.install(
-            level="DEBUG",
-            fmt="[%(asctime)s] [%(levelname)-8s] %(message)s",
-            logger=log,
+            level="DEBUG", fmt="[%(asctime)s] [%(levelname)-8s] %(message)s", logger=log
         )
 
     image = open_image(args.source)
@@ -210,18 +214,28 @@ if __name__ == "__main__":
         exit(1)
 
     common_pixels = get_common_pixels(image)
-    
-    if args.encode:
-        binary_data = ''.join(format(ord(x), 'b') for x in args.data)
-        log.debug(f"Data: {args.data} = {binary_data}")
 
+    if args.encode:
+        if not args.data:
+            log.error("You must provide a string to encode. Exiting...")
+            exit(1)
+
+        # convert the raw message data to binary
+        binary_data = str_to_bin(args.data)
+
+        # encode the message in the image
         new_image = encode_message(image, binary_data)
 
-        save_image(new_image, args.destination or f"new.{args.source}")
-    
-    elif args.decode:
-        decoded_message = decode_message(image)
-        log.info(f"Decoded message: {decoded_message}")
+        # save the new image to disk
+        save_image(new_image, args.out or f"new.{args.source}")
 
+    elif args.decode:
+        # extract the raw binary from the image
+        decoded_binary = decode_message(image)
+
+        # convert the extracted binary to a UTF8 decoded string
+        decoded_message = bin_to_str(decoded_binary)
+
+        log.info(f"Decoded message: {decoded_message}")
 
     log.info("All steps completed.")
