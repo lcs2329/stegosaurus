@@ -10,6 +10,8 @@ import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
 from skimage import feature
+from skimage.color import rgb2gray
+
 
 log = logging.getLogger(__name__)
 coloredlogs.install(level="INFO", fmt="%(message)s", logger=log)
@@ -198,23 +200,13 @@ def encode_message(image: Image, data: str) -> Image:
 
 
 def canny_detection(image):
-
-    img_arr = np.array(Image.open(image), dtype=np.uint8)
-
-    from skimage.color import rgb2gray
+    im = Image.open(image)
+    img_arr = np.array(im, dtype=np.uint8)
     img_gray = rgb2gray(img_arr)
-
-    edges1 = feature.canny(img_gray)
-    edges2 = feature.canny(img_gray, sigma=)
-
-    plt.imshow(edges1)
-
-    import scipy.misc
-    im = Image.fromarray(edges1)
-    im.save("1.png")
-    im2 = Image.fromarray(edges2)
-    im2.save("2.png")
-    return edges1
+    edges = feature.canny(img_gray, sigma=3)
+    
+    edge = np.where(edges)
+    return edges
 
 
 def decode_message(image: Image) -> str:
