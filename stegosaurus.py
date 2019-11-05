@@ -12,20 +12,23 @@ from PIL import Image
 log = logging.getLogger(__name__)
 coloredlogs.install(level="INFO", fmt="%(message)s", logger=log)
 
-BOLD = '\033[1m'
+BOLD = "\033[1m"
 GREEN = "\033[1;32m"
-LIGHT_GRAY = '\033[32m'
-ITALICS = '\033[3m'
-YELLOW = '\033[1;33m'
-RESET = '\033[0m'
+LIGHT_GRAY = "\033[32m"
+ITALICS = "\033[3m"
+YELLOW = "\033[1;33m"
+RESET = "\033[0m"
 
-ICON = "                ___ \n\
-               / *_) \n\
-              / / \n\
-     _/\/\/\_/ / \n\
-   _|         / \n\
- _|  (  | (  | \n\
-/__.-'|_|--|_|" 
+ICON = "\
+                ___     \n\
+               / *_)    \n\
+              / /       \n\
+     _/\/\/\_/ /        \n\
+   _|         /         \n\
+ _|  (  | (  |          \n\
+/__.-'|_|--|_|            \
+"
+
 
 def open_image(image_path: str) -> Image:
     """
@@ -224,6 +227,10 @@ def decode_message(image: Image) -> str:
     return data
 
 
+def open_data_file(filepath: str) -> str:
+    return
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Hide messages within image files.")
     group = parser.add_mutually_exclusive_group()
@@ -232,7 +239,9 @@ if __name__ == "__main__":
     group.add_argument("-d", "--decode", action="store_true", help="Decode an image.")
 
     parser.add_argument("-s", "--source", type=str, required=True, help="Source image.")
-    parser.add_argument("-o", "--out", type=str, default=None, help="Destination image.")
+    parser.add_argument(
+        "-o", "--out", type=str, default=None, help="Destination image."
+    )
     parser.add_argument("--data", type=str, help="String to hide.")
     parser.add_argument(
         "-v",
@@ -282,6 +291,6 @@ if __name__ == "__main__":
         decoded_message = bin_to_str(decoded_binary)
 
         log.info(f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET} {decoded_message}")
-    
+
     print(f"\n\n{ICON}")
     log.info(f"{GREEN}All steps completed.{RESET}")
