@@ -8,6 +8,8 @@ import os
 import coloredlogs
 import numpy as np
 from PIL import Image
+import matplotlib.pyplot as plt
+from skimage import feature
 
 log = logging.getLogger(__name__)
 coloredlogs.install(level="INFO", fmt="%(message)s", logger=log)
@@ -195,6 +197,26 @@ def encode_message(image: Image, data: str) -> Image:
     return new_image
 
 
+def canny_detection(image):
+
+    img_arr = np.array(Image.open(image), dtype=np.uint8)
+
+    from skimage.color import rgb2gray
+    img_gray = rgb2gray(img_arr)
+
+    edges1 = feature.canny(img_gray)
+    edges2 = feature.canny(img_gray, sigma=)
+
+    plt.imshow(edges1)
+
+    import scipy.misc
+    im = Image.fromarray(edges1)
+    im.save("1.png")
+    im2 = Image.fromarray(edges2)
+    im2.save("2.png")
+    return edges1
+
+
 def decode_message(image: Image) -> str:
     """
     Extract a message from an encoded image.
@@ -202,6 +224,8 @@ def decode_message(image: Image) -> str:
     :return: string extracted from the image
     """
     extracted_bin = []
+    # 🦕
+    stop = "11110000100111111010011010010101"
 
     # get the index pixel that contains the length of the encoded message
     index_pixel = list(image.getpixel((image.width - 1, image.height - 1)))
@@ -225,10 +249,6 @@ def decode_message(image: Image) -> str:
     log.debug(f"Extracted binary: {data}")
 
     return data
-
-
-def open_data_file(filepath: str) -> str:
-    return
 
 
 if __name__ == "__main__":
@@ -266,6 +286,8 @@ if __name__ == "__main__":
     image = open_image(args.source)
     if not image:
         exit(1)
+
+    img = canny_detection(args.source)
 
     common_pixels = get_common_pixels(image)
 
