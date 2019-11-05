@@ -101,23 +101,41 @@ def get_common_pixels(image: Image, n: int = 5) -> list:
     return top_five
 
 
-def str_to_bin(data: str, encoding="utf-8", errors="surrogatepass") -> str:
+def str_to_bin(data: str) -> str:
     """
-    Convert an ASCII string to binary.
+    Convert a UTF8 string to binary.
     :param data: string to convert
     :return: binary string (e.g. "10010001100101110110011011001101111")
     """
     log.debug(f"Attempting to convert {data} to binary...")
-    bits = bin(int.from_bytes(data.encode(encoding, errors), "big"))[2:]
-    binary = bits.zfill(8 * ((len(bits) + 7) // 8))
+    try:
+        bits = bin(int.from_bytes(data.encode("utf-8", "surrogatepass"), "big"))[2:]
+        binary = bits.zfill(8 * ((len(bits) + 7) // 8))
+    except:
+        log.exception(f"Unable to convert {data}.")
+        return
+
     log.debug(f"{data} = {binary}")
     return binary
 
 
-def bin_to_str(bits, encoding="utf-8", errors="surrogatepass"):
+def bin_to_str(bits: str) -> str:
+    """
+    Convert a binary string to a UTF8 string.
+    :param bits: binary string to convert
+    :return: UTF8 encoded string (e.g. "hello")
+    """
     log.debug(f"Attempting to convert {bits} to UTF8...")
     n = int(bits, 2)
-    data = n.to_bytes((n.bit_length() + 7) // 8, "big").decode(encoding, errors) or "\0"
+    try:
+        data = (
+            n.to_bytes((n.bit_length() + 7) // 8, "big").decode("utf8", "surrogatepass")
+            or "\0"
+        )
+    except:
+        log.exception(f"Unable to convert {bits}.")
+        return
+
     log.debug(f"{bits} = {data}")
     return data
 
@@ -137,18 +155,25 @@ def encode_message(image: Image, data: str) -> Image:
     i = 0
     for x in range(width):
         for y in range(height):
+            # start in the top left and work through the image
             pixel = list(image.getpixel((x, y)))
 
+            # for each RGB value of the pixel
             for n in range(0, 3):
+
+                # if we still have data to encode
                 if i < len(data):
+
+                    # if the data bit is 1, set the image bit to 1
+                    # if the data bit is 0, keep it at 0
                     pixel[n] = pixel[n] & ~1 | int(data[i])
                     i += 1
 
             # set pixel in new image
             new_image.putpixel((x, y), tuple(pixel))
 
+    # write the data length to the index pixel of the image
     log.debug(f"Writing data length {len(data)} to pixel (0,0)...")
-
     new_image.putpixel((image.width - 1, image.height - 1), tuple([len(data), 0, 0]))
     return new_image
 
@@ -160,6 +185,8 @@ def decode_message(image: Image) -> str:
     :return: string extracted from the image
     """
     extracted_bin = []
+
+    # get the index pixel that contains the length of the encoded message
     index_pixel = list(image.getpixel((image.width - 1, image.height - 1)))
     data_length = index_pixel[0]
     log.debug(f"Data length recorded at pixel (0, 0) is {data_length}.")
@@ -167,9 +194,13 @@ def decode_message(image: Image) -> str:
     width, height = image.size
     for x in range(0, width):
         for y in range(0, height):
+            # go through each pixel of the image
             pixel = list(image.getpixel((x, y)))
 
+            # for each RGB value of the pixel
             for n in range(0, 3):
+
+                # if we still have data in the image, pull the LSB
                 if len(extracted_bin) < data_length:
                     extracted_bin.append(pixel[n] & 1)
 
