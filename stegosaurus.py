@@ -10,37 +10,55 @@ from PIL import Image
 
 log = logging.getLogger(__name__)
 coloredlogs.install(
-    level="INFO", fmt="[%(asctime)s] [%(levelname)-8s] %(message)s'", logger=log
+    level="INFO", fmt="%(message)s", logger=log
 )
 
 
 def open_image(image_path: str) -> Image:
-    """Open an image."""
+    """
+    Open an image.
+    :param image_path: path to the image to be opened
+    :return: Image object from path
+    """
     if not os.path.exists(image_path):
         log.error(f"Image '{args.source}' not found.")
         return
 
-    log.debug(f"Opening image at path '{image_path}'...")
+    log.info(f"Opening image '{image_path}'...'")
     try:
         image = Image.open(image_path, "r")
     except:
         log.exception(f"Unable to open image at path '{image_path}'.")
         return
+    log.debug(f"Image '{image_path}' opened successfully.")
 
     return image
 
 
 def save_image(image: Image, path: str) -> None:
-    """Save an image."""
-    log.debug(f"Saving image to '{path}'...")
+    """
+    Save an image.
+    :param image: image to be saved
+    :param path: path to save the image to
+    :return: None
+    """
+    log.info(f"Saving image to '{path}'...")
     try:
         image.save(path, "png")
     except:
         log.exception(f"Unable to save image to '{path}'.")
+        return
+
+    log.debug(f"Image saved to '{path}' successfully. ")
 
 
 def create_image(x: int, y: int) -> Image:
-    """Create a new image with the given size."""
+    """
+    Create a new image with the given size.
+    :param x: image width
+    :param y: image height
+    :return: new image with dimensions x * y
+    """
     log.debug(f"Creating new image of size {x}, {y}...")
     try:
         image = Image.new("RGB", (x, y))
@@ -52,11 +70,16 @@ def create_image(x: int, y: int) -> Image:
 
 
 def get_pixel(image: Image, x: int, y: int) -> tuple:
-    """Get a given pixel from an image."""
+    """
+    Get a given pixel from an image.
+    :param image: an image to get a pixel from
+    :param x: x coordinate
+    :param y: y coordinate
+    :return: A string tuple (e.g. ("00101010", "11101011", "00010110"))
+    """
     width, height = image.size
-    log.debug(f"Image width: {width}, height: {height}")
     if x > width or y > height:
-        log.debug(f"Pixel coordinates {x}, {y} out of bounds.")
+        log.debug(f"Pixel coordinates {x}, {y} out of bounds ({width}, {height}).")
         return None
 
     pixel = image.getpixel((x, y))
@@ -65,7 +88,12 @@ def get_pixel(image: Image, x: int, y: int) -> tuple:
 
 
 def get_common_pixels(image: Image, n: int = 5) -> list:
-    """Get the n most common pixel values."""
+    """
+    Get the n most common pixel values.
+    :param image: An image to analyze for common pixel values.
+    :param n: the number of common pixels to scan for (default 5)
+    :return: list of n most common pixels 
+    """
     colors = Image.Image.getcolors(image, maxcolors=image.size[0] * image.size[1])
 
     # frequency: pixel value (0-255)
@@ -74,40 +102,91 @@ def get_common_pixels(image: Image, n: int = 5) -> list:
     return top_five
 
 
-def transform_pixels(image: Image, pixel_value: tuple, shift: int) -> Image:
-    """Modify a given image."""
+def int_to_bin(rgb: tuple) -> tuple:
+    """
+    Convert an integer tuple to a binary (string) tuple.
+    :param rgb: An integer tuple (e.g. (220, 110, 96))
+    :return: A string tuple (e.g. ("00101010", "11101011", "00010110"))
+    """
+    r, g, b = rgb
+    return ('{0:08b}'.format(r),
+            '{0:08b}'.format(g),
+            '{0:08b}'.format(b))
+
+
+def bin_to_int(rgb: tuple) -> tuple:
+    """
+    Convert a binary (string) tuple to an integer tuple.
+    :param rgb: A string tuple (e.g. ("00101010", "11101011", "00010110"))
+    :return: Return an int tuple (e.g. (220, 110, 96))
+    """
+    r, g, b = rgb
+    return (int(r, 2),
+            int(g, 2),
+            int(b, 2))
+
+
+def encode_message(image: Image, data:str) -> Image:
+    """
+    Encode a message into an image.
+    :param image: image to be encoded into
+    :param data: string data to be encoded into the image
+    :return: new image with data encoded inside
+    """
     width, height = image.size
 
     # create new image & pixel map
     new_image = create_image(width, height)
-    pixels = new_image.load()
 
+    i = 0
     for x in range(width):
         for y in range(height):
-            pixel = get_pixel(image, x, y)
+            pixel = list(image.getpixel((x, y)))
 
-            red = pixel[0]
-            green = pixel[1]
-            blue = pixel[2]
+            for n in range(0, 3):
+                if i < len(data):
+                    pixel[n] = pixel[n] & ~1 | int(data[i])
+                    i += 1
 
-            if pixel == pixel_value:
-                # if we have a match for our desired modified pixel, then
-                # set the pixel in the new image accordingly
-                red = red * shift // 255
-                green = red * shift // 255
-                blue = red * shift // 255
-            
             # set pixel in new image
-            pixels[x, y] = (int(red), int(green), int(blue))
+            new_image.putpixel((x,y), tuple(pixel))
 
     return new_image
 
 
+def decode_message(image: Image) -> str:
+    """
+    Extract a message from an encoded image.
+    :param image: image to have message extracted from
+    :return: string extracted from the image
+    """
+    extracted_bin = []
+
+    width, height = image.size
+    for x in range(0, width):
+        for y in range(0, height):
+            pixel = list(image.getpixel((x, y)))
+
+            for n in range(0,3):
+                extracted_bin.append(pixel[n] & 1)
+
+    data = "".join([str(x) for x in extracted_bin])
+    return data
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Hide messages within image files.")
+    group = parser.add_mutually_exclusive_group()
+   
+    group.add_argument("-e", "--encode", action="store_true", help="Encode a string.")
+    group.add_argument("-d", "--decode", action="store_true", help="Decode an image.")
+   
     parser.add_argument("-s", "--source", type=str, required=True, help="Source image")
     parser.add_argument(
-        "-d", "--destination", type=str, default=None, help="Destination image"
+        "-o", "--out", type=str, default=None, help="Destination image"
+    )
+    parser.add_argument(
+        "--data", type=str, help="String to hide"
     )
     parser.add_argument(
         "-v",
@@ -122,18 +201,27 @@ if __name__ == "__main__":
     if args.verbose:
         coloredlogs.install(
             level="DEBUG",
-            fmt="[%(asctime)s] [%(levelname)-8s] %(message)s'",
+            fmt="[%(asctime)s] [%(levelname)-8s] %(message)s",
             logger=log,
         )
-    
+
     image = open_image(args.source)
     if not image:
         exit(1)
 
     common_pixels = get_common_pixels(image)
+    
+    if args.encode:
+        binary_data = ''.join(format(ord(x), 'b') for x in args.data)
+        log.debug(f"Data: {args.data} = {binary_data}")
 
-    new_image = transform_pixels(image, common_pixels[0][1], 2)
+        new_image = encode_message(image, binary_data)
 
-    save_image(new_image, args.destination or f"new.{args.source}")
+        save_image(new_image, args.destination or f"new.{args.source}")
+    
+    elif args.decode:
+        decoded_message = decode_message(image)
+        log.info(f"Decoded message: {decoded_message}")
+
 
     log.info("All steps completed.")
