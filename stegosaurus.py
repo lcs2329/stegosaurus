@@ -11,7 +11,8 @@ from PIL import Image
 import matplotlib.pyplot as plt
 from skimage import feature
 from skimage.color import rgb2gray
-
+import time
+from collections import Counter, deque
 
 log = logging.getLogger(__name__)
 coloredlogs.install(level="INFO", fmt="%(message)s", logger=log)
@@ -107,7 +108,7 @@ def get_pixel(image: Image, x: int, y: int) -> tuple:
     return pixel
 
 
-def get_common_pixels(image: Image, n: int = 5) -> list:
+def get_common_reds(image: Image, n: int = 5) -> list:
     """
     Get the n most common pixel values.
     :param image: An image to analyze for common pixel values.
@@ -116,10 +117,15 @@ def get_common_pixels(image: Image, n: int = 5) -> list:
     """
     colors = Image.Image.getcolors(image, maxcolors=image.size[0] * image.size[1])
 
-    # frequency: pixel value (0-255)
-    top_five = sorted(colors, key=lambda t: t[0], reverse=True)[:n]
-    log.debug(f"Top {n} most common pixel values: {top_five}")
-    return top_five
+    # get the first value (pixel tuple), then get the first val (red)
+    reds = [pixel[1][0] for pixel in colors]
+
+    occ_count = Counter(reds)
+    most_common_reds = occ_count.most_common(n)
+    reds = [item[0] for item in most_common_reds]
+    log.debug(f"Most common reds: {reds}")
+
+    return reds
 
 
 def str_to_bin(data: str) -> str:
@@ -161,17 +167,23 @@ def bin_to_str(bits: str) -> str:
     return data
 
 
-def encode_message(image: Image, data: str) -> Image:
+def encode_message(image: Image, data: str, target_red) -> Image:
     """
     Encode a message into an image.
     :param image: image to be encoded into
     :param data: string data to be encoded into the image
     :return: new image with data encoded inside
     """
-    width, height = image.size
+    # 🦕
+    stop = "11110000100111111010011010010101"
+    data += stop
 
     # create new image & pixel map
-    new_image = create_image(width, height)
+    new_image = image.copy()
+
+    width, height = image.size
+    log.debug(f"Target red is {target_red}...")
+    time.sleep(3)
 
     i = 0
     for x in range(width):
@@ -179,50 +191,34 @@ def encode_message(image: Image, data: str) -> Image:
             # start in the top left and work through the image
             pixel = list(image.getpixel((x, y)))
 
-            # for each RGB value of the pixel
-            for n in range(0, 3):
+            if pixel[0] == target_red:
 
                 # if we still have data to encode
                 if i < len(data):
 
                     # if the data bit is 1, set the image bit to 1
                     # if the data bit is 0, keep it at 0
-                    pixel[n] = pixel[n] & ~1 | int(data[i])
+                    pixel[1] = pixel[1] & ~1 | int(data[i])
                     i += 1
 
             # set pixel in new image
             new_image.putpixel((x, y), tuple(pixel))
 
-    # write the data length to the index pixel of the image
-    log.debug(f"Writing data length {len(data)} to pixel (0,0)...")
-    new_image.putpixel((image.width - 1, image.height - 1), tuple([len(data), 0, 0]))
     return new_image
 
 
-def canny_detection(image):
-    im = Image.open(image)
-    img_arr = np.array(im, dtype=np.uint8)
-    img_gray = rgb2gray(img_arr)
-    edges = feature.canny(img_gray, sigma=3)
-    
-    edge = np.where(edges)
-    return edges
-
-
-def decode_message(image: Image) -> str:
+def decode_message(image: Image, target_red) -> str:
     """
     Extract a message from an encoded image.
     :param image: image to have message extracted from
     :return: string extracted from the image
     """
-    extracted_bin = []
+    extracted_bin = ""
     # 🦕
     stop = "11110000100111111010011010010101"
-
-    # get the index pixel that contains the length of the encoded message
-    index_pixel = list(image.getpixel((image.width - 1, image.height - 1)))
-    data_length = index_pixel[0]
-    log.debug(f"Data length recorded at pixel (0, 0) is {data_length}.")
+    # stop = [int(i) for i in stop]
+    buffer = deque()
+    log.debug(f"Target red is {target_red}...")
 
     width, height = image.size
     for x in range(0, width):
@@ -230,17 +226,19 @@ def decode_message(image: Image) -> str:
             # go through each pixel of the image
             pixel = list(image.getpixel((x, y)))
 
-            # for each RGB value of the pixel
-            for n in range(0, 3):
+            if pixel[0] == target_red:
+                extracted_bit = pixel[1] & 1
+                extracted_bin += str(extracted_bit)
 
-                # if we still have data in the image, pull the LSB
-                if len(extracted_bin) < data_length:
-                    extracted_bin.append(pixel[n] & 1)
+                if len(extracted_bin) > len(stop):
+                    extracted = extracted_bin[len(extracted_bin) - len(stop) - 1 : -1]
+                    if extracted == stop:
+                        log.debug(f"Found stop after {extracted}")
+                        return extracted_bin[: len(extracted_bin) - len(stop) - 1]
+                    else:
+                        log.debug(extracted_bin)
 
-    data = "".join([str(x) for x in extracted_bin])
-    log.debug(f"Extracted binary: {data}")
-
-    return data
+    # log.debug(f"Extracted binary: {extracted_bin}")
 
 
 if __name__ == "__main__":
@@ -279,9 +277,7 @@ if __name__ == "__main__":
     if not image:
         exit(1)
 
-    img = canny_detection(args.source)
-
-    common_pixels = get_common_pixels(image)
+    common_reds = get_common_reds(image)
 
     if args.encode:
         if not args.data:
@@ -292,14 +288,14 @@ if __name__ == "__main__":
         binary_data = str_to_bin(args.data)
 
         # encode the message in the image
-        new_image = encode_message(image, binary_data)
+        new_image = encode_message(image, binary_data, common_reds[0])
 
         # save the new image to disk
         save_image(new_image, args.out or f"new.{args.source}")
 
     elif args.decode:
         # extract the raw binary from the image
-        decoded_binary = decode_message(image)
+        decoded_binary = decode_message(image, common_reds[0])
 
         # convert the extracted binary to a UTF8 decoded string
         decoded_message = bin_to_str(decoded_binary)
