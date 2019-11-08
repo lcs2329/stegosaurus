@@ -8,8 +8,8 @@ from collections import Counter
 
 import coloredlogs
 import numpy as np
-from tqdm import tqdm
 from PIL import Image
+from tqdm import tqdm
 
 log = logging.getLogger(__name__)
 coloredlogs.install(level="INFO", fmt="%(message)s", logger=log)
@@ -45,7 +45,7 @@ def open_image(image_path: str) -> Image:
     log.info(f"{YELLOW}{ITALICS}Opening image '{image_path}'...{RESET}")
     try:
         image = Image.open(image_path, "r")
-    except:
+    except IOError:
         log.exception(f"Unable to open image at path '{image_path}'.")
         return
     log.debug(f"Image '{image_path}' opened successfully.")
@@ -63,7 +63,7 @@ def open_file(file_path: str) -> str:
     try:
         with open(file_path, "r") as data_file:
             data = data_file.read()
-    except:
+    except OSError:
         log.exception(f"Unable to parse data file '{file_path}'.")
         return
 
@@ -81,7 +81,7 @@ def save_image(image: Image, path: str) -> None:
     log.info(f"{YELLOW}{ITALICS}Saving image to '{path}'...{RESET}")
     try:
         image.save(path, "PNG")
-    except:
+    except IOError:
         log.exception(f"Unable to save image to '{path}'.")
         return
 
@@ -118,12 +118,18 @@ def str_to_bin(data: str) -> str:
     :param data: string to convert
     :return: binary string (e.g. "10010001100101110110011011001101111")
     """
+    try:
+        encoded_data = data.encode("utf-8", "surrogatepass")
+    except UnicodeEncodeError:
+        log.exception(f"Unable to encode '{data}'.")
+        return
+
     log.debug(f"Attempting to convert {data} to binary...")
     try:
-        bits = bin(int.from_bytes(data.encode("utf-8", "surrogatepass"), "big"))[2:]
+        bits = bin(int.from_bytes(encoded_data, "big"))[2:]
         binary = bits.zfill(8 * ((len(bits) + 7) // 8))
     except:
-        log.exception(f"Unable to convert {data}.")
+        log.exception(f"Unable to convert '{encoded_data}' to binary.")
         return
 
     log.debug(f"{data} = {binary}")
@@ -160,7 +166,7 @@ def hash_str(data: str) -> str:
     # encode our data into a byte representation
     try:
         encoded_data = data.encode()
-    except UnicodeDecodeError:
+    except UnicodeEncodeError:
         log.exception(f"Unable to encode '{data}'.")
         return
 
