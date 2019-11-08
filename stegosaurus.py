@@ -80,7 +80,7 @@ def save_image(image: Image, path: str) -> None:
     """
     log.info(f"{YELLOW}{ITALICS}Saving image to '{path}'...{RESET}")
     try:
-        image.save(path, "png")
+        image.save(path, "PNG")
     except:
         log.exception(f"Unable to save image to '{path}'.")
         return
@@ -88,40 +88,26 @@ def save_image(image: Image, path: str) -> None:
     log.debug(f"Image saved to '{path}' successfully.")
 
 
-def get_pixel(image: Image, x: int, y: int) -> tuple:
-    """
-    Get a given pixel from an image.
-    :param image: an image to get a pixel from
-    :param x: x coordinate
-    :param y: y coordinate
-    :return: A string tuple (e.g. ("00101010", "11101011", "00010110"))
-    """
-    width, height = image.size
-    if x > width or y > height:
-        log.debug(f"Pixel coordinates {x}, {y} out of bounds ({width}, {height}).")
-        return None
-
-    pixel = image.getpixel((x, y))
-    log.debug(f"Pixel at {x}, {y} is {pixel}.")
-    return pixel
-
-
-def get_target_reds(image: Image, n: int = 5) -> list:
+def get_target_reds(image: Image, n=5) -> list:
     """
     Get the n most common pixel values.
     :param image: An image to analyze for common pixel values.
-    :param n: the number of common pixels to scan for (default 5)
     :return: list of n most common pixels 
     """
+    log.debug("Extracting reds from source image...")
     colors = Image.Image.getcolors(image, maxcolors=image.size[0] * image.size[1])
 
-    # get the first value (pixel tuple), then get the first val (red)
+    # getcolors will return a tuple where the first value is the count of the
+    # number of times the pixel appears, and the second will be the pixel tuple
+    # (R, G, B). we want to get the second value (pixel tuple), then
+    # get the first val (red)
     reds = [pixel[1][0] for pixel in colors]
 
-    occ_count = Counter(reds)
-    most_common_reds = occ_count.most_common(n)
+    # sort the list by the most dominant reds
+    most_common_reds = Counter(reds).most_common(n)
+
+    # extract the raw red value (0-255)
     reds = [item[0] for item in most_common_reds]
-    log.debug(f"Most common reds: {reds}")
 
     return reds
 
@@ -165,16 +151,30 @@ def bin_to_str(bits: str) -> str:
     return data
 
 
-def hash_str(data):
+def hash_str(data: str) -> str:
     """
     Generate a binary representation of an MD5 hash of a string.
     :param data: data to be hashed
     :return: binary MD5 hash
     """
-    hash_object = hashlib.md5(data.encode())
-    hex_hash = hash_object.hexdigest()
+    # encode our data into a byte representation
+    try:
+        encoded_data = data.encode()
+    except UnicodeDecodeError:
+        log.exception(f"Unable to encode '{data}'.")
+        return
+
+    # get the MD5 hash of our data, which will be in hex
+    try:
+        hex_hash = hashlib.md5(encoded_data).hexdigest()
+    except:
+        log.exception(f"Unable to calculate the hash of '{data}'.")
+        return
+
+    # convert our hex hash into binary
     binary_of_hash = bin(int(hex_hash, 16))[2:]
 
+    # pad the right with zeroes if we are not at 128 bits
     while len(binary_of_hash) != 128:
         binary_of_hash += "0"
 
@@ -192,6 +192,7 @@ def encode_message(image: Image, data: str, target_reds: list) -> Image:
     """
     log.info(f"{YELLOW}{ITALICS}Encoding data...{RESET}")
 
+    # get an MD5 hash of our data
     data_hash = hash_str(data)
     log.debug(f"Hash of '{data}' is {data_hash} (length: {len(data_hash)})")
 
@@ -203,15 +204,22 @@ def encode_message(image: Image, data: str, target_reds: list) -> Image:
 
     data_index = 0
     hash_index = 0
+
+    # show a progress bar equivalent to all of the data we need to write
+    # (128 bits for the hash + number of bits in our data)
     with tqdm(total=len(data) + 128, leave=False) as pbar:
+
         for x in range(width):
             for y in range(height):
-                # start in the top left and work through the image
+
+                # extract the pixel tuple (R, G, B)
                 pixel = list(image.getpixel((x, y)))
 
+                # if the R is in our target reds
                 if pixel[0] in target_reds:
 
-                    # if we still have data to encode
+                    # if we still have data to encode, then encode the current
+                    # data bit into the LSB of the blue channel
                     if data_index < len(data):
 
                         # if the data bit is 1, set the image bit to 1
@@ -220,7 +228,8 @@ def encode_message(image: Image, data: str, target_reds: list) -> Image:
                         data_index += 1
                         pbar.update(1)
 
-                    # if we still have some of our hash to encode
+                    # if we still have some of our hash to encode, then encode
+                    # the current hash bit into the LSB of the green channel
                     if hash_index < len(data_hash):
                         pixel[1] = pixel[1] & ~1 | int(data_hash[hash_index])
                         hash_index += 1
@@ -229,66 +238,83 @@ def encode_message(image: Image, data: str, target_reds: list) -> Image:
                     # set pixel in new image
                     new_image.putpixel((x, y), tuple(pixel))
 
+                    # if we have written our hash and our data, then we are done
                     if data_index == len(data) and hash_index == len(data_hash):
                         return new_image
 
+    # if we still have data to write, then we didn't have enough pixels
+    # in the image to encode our data
     if data_index < len(data):
         log.error("Not enough bits to encode data within the image.")
         return
-
-    # return new_image
 
 
 def decode_message(image: Image, target_reds: list) -> str:
     """
     Extract a message from an encoded image.
     :param image: image to have message extracted from
-    :param target_reds: most common red values that will serve as the indexes
-        for data decoding
-    :return: string extracted from the image
+    :param target_reds: red values that will serve as the indexes for data 
+        decoding, in order of dominance
+    :return: binary data extracted from the image
     """
     log.info(f"{YELLOW}{ITALICS}Decoding data...{RESET}")
 
     extracted_bin = ""
-    log.debug(f"Target reds are {target_reds}...")
 
     width, height = image.size
 
-    # first, extract the hash
+    # first, extract the hash. the hash will be encoded into the LSB
+    # of the green channels for each pixel in the reds, in order of dominance
     data_hash = ""
     for x in range(0, width):
         for y in range(0, height):
 
+            # an MD5 hash is 128 bits, so keep going until we get all 128
             if len(data_hash) < 128:
 
+                # extract the pixel tuple (R, G, B)
                 pixel = list(image.getpixel((x, y)))
 
+                # if the R is in our target reds, extract the LSB
                 if pixel[0] in target_reds:
                     extracted_bit = pixel[1] & 1
                     data_hash += str(extracted_bit)
+
+            # we have our full hash, so we can break
             else:
                 break
 
-    log.debug(f"Extracted hash: {data_hash}, length: {len(data_hash)}")
+    log.debug(f"Extracted hash: {data_hash} (length: {len(data_hash)})")
+
+    # show a progress bar equivalent to all of the pixels in the image
+    # (worse case, we would have to check everything)
     with tqdm(total=width * height, leave=False) as pbar:
+
         for x in range(0, width):
             for y in range(0, height):
-                # go through each pixel of the image
+
+                # extract the pixel tuple (R, G, B)
                 pixel = list(image.getpixel((x, y)))
 
+                # if the R is in our target reds, extract the LSB
                 if pixel[0] in target_reds:
+
                     extracted_bit = pixel[2] & 1
                     extracted_bin += str(extracted_bit)
 
+                    # calculate the hash of the bit string we have extracted
+                    # thus far. if it is equal to the hash we extracted earlier
+                    # from the green channel, we have our full message
                     hash_of_extracted = hash_str(extracted_bin)
 
                     if str(hash_of_extracted) == str(data_hash):
-                        log.debug(f"Found hash!")
+                        log.debug(f"Found hash! Extracted binary is {extracted_bin}")
                         return extracted_bin
 
                 pbar.update(1)
             pbar.update(1)
 
+    # if we got this far, we didnt find data equivalent to our hash
     log.error("No data found.")
     return None
 
@@ -321,6 +347,7 @@ if __name__ == "__main__":
         parser.print_help()
         exit(1)
 
+    # if we threw the verbose flag, then enable debug logging
     if args.verbose:
         coloredlogs.install(
             level="DEBUG", fmt="[%(asctime)s] [%(levelname)-8s] %(message)s", logger=log
@@ -330,14 +357,19 @@ if __name__ == "__main__":
     if not image:
         exit(1)
 
-    common_reds = get_target_reds(image, n=20)
+    # we will use the reds in the image to encode our message, in order of
+    # most dominant red value in the image (from 0-255)
+    target_reds = get_target_reds(image, n=20)
 
     if args.encode:
+
+        # if we are encoding, we can either use an input file or a raw string
         if args.file:
             data = open_file(args.file)
 
         elif args.data:
             data = args.data
+
         else:
             log.error("You must provide a string or file to encode. Exiting...")
             exit(1)
@@ -346,18 +378,18 @@ if __name__ == "__main__":
         binary_data = str_to_bin(data)
 
         # encode the message in the image
-        new_image = encode_message(image, binary_data, common_reds)
+        new_image = encode_message(image, binary_data, target_reds)
 
+        # if we were able to actually encode everything, then save the image
         if new_image:
 
-            # save the new image to disk
             save_image(new_image, args.out or f"new.{args.source}")
 
     elif args.decode:
         # extract the raw binary from the image
-        decoded_binary = decode_message(image, common_reds)
+        decoded_binary = decode_message(image, target_reds)
 
-        # convert the extracted binary to a UTF8 decoded string
+        # convert the extracted binary to a UTF8 decoded string, if we pulled it
         if decoded_binary:
             decoded_message = bin_to_str(decoded_binary)
 
