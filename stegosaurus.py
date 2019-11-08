@@ -2,18 +2,15 @@
 
 import argparse
 import binascii
+import hashlib
 import logging
 import os
+from collections import Counter
 
-import hashlib
 import coloredlogs
+import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
-import matplotlib.pyplot as plt
-from skimage import feature
-from skimage.color import rgb2gray
-import time
-from collections import Counter, deque
 
 log = logging.getLogger(__name__)
 coloredlogs.install(level="INFO", fmt="%(message)s", logger=log)
@@ -55,6 +52,25 @@ def open_image(image_path: str) -> Image:
     log.debug(f"Image '{image_path}' opened successfully.")
 
     return image
+
+
+def open_file(file_path: str) -> str:
+    if not os.path.exists(file_path):
+        log.error(f"File '{file_path}' not found.")
+        return
+
+    log.info(f"{YELLOW}{ITALICS}Opening file '{file_path}'...'{RESET}")
+    
+    try:
+        with open(file_path, "r") as data_file:
+            data = data_file.read()
+    except:
+        log.exception(f"Unable to parse data file '{file_path}'.")
+        return
+    
+    log.debug(f"Data read from '{file_path}': {data}")
+    return data
+
 
 
 def save_image(image: Image, path: str) -> None:
@@ -109,7 +125,7 @@ def get_pixel(image: Image, x: int, y: int) -> tuple:
     return pixel
 
 
-def get_common_reds(image: Image, n: int = 5) -> list:
+def get_target_reds(image: Image, n: int = 5) -> list:
     """
     Get the n most common pixel values.
     :param image: An image to analyze for common pixel values.
@@ -173,7 +189,6 @@ def hash_str(data):
     hex_hash = hash_object.hexdigest()
     binary_of_hash = bin(int(hex_hash, 16))[2:]
 
-    #log.debug(f"hash of '{data}': {binary_of_hash} (length: {len(binary_of_hash)})")
     while len(binary_of_hash) != 128:
         binary_of_hash += "0"
 
@@ -185,8 +200,12 @@ def encode_message(image: Image, data: str, target_reds) -> Image:
     Encode a message into an image.
     :param image: image to be encoded into
     :param data: string data to be encoded into the image
+    :param target_reds: most common red values that will serve as the indexes
+        for data encoding
     :return: new image with data encoded inside
     """
+    log.info(f"{YELLOW}{ITALICS}Encoding data...'{RESET}")
+
     data_hash = hash_str(data)
     log.debug(f"Hash of '{data}' is {data_hash} (length: {len(data_hash)})")
 
@@ -221,6 +240,10 @@ def encode_message(image: Image, data: str, target_reds) -> Image:
                 # set pixel in new image
                 new_image.putpixel((x, y), tuple(pixel))
 
+    if data_index < len(data):
+        log.error("Not enough bits to encode data within the image.")
+        return
+
     return new_image
 
 
@@ -228,8 +251,12 @@ def decode_message(image: Image, target_reds) -> str:
     """
     Extract a message from an encoded image.
     :param image: image to have message extracted from
+    :param target_reds: most common red values that will serve as the indexes
+        for data decoding
     :return: string extracted from the image
     """
+    log.info(f"{YELLOW}{ITALICS}Decoding data...'{RESET}")
+
     extracted_bin = ""
     log.debug(f"Target reds are {target_reds}...")
 
@@ -282,6 +309,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-o", "--out", type=str, default=None, help="Destination image."
     )
+    parser.add_argument("-f", "--file", type=str)
     parser.add_argument("--data", type=str, help="String to hide.")
     parser.add_argument(
         "-v",
@@ -307,21 +335,28 @@ if __name__ == "__main__":
     if not image:
         exit(1)
 
-    common_reds = get_common_reds(image)
+    common_reds = get_target_reds(image, n=20)
 
     if args.encode:
-        if not args.data:
-            log.error("You must provide a string to encode. Exiting...")
+        if args.file:
+            data = open_file(args.file)
+
+        elif args.data:
+            data = args.data
+        else:
+            log.error("You must provide a string or file to encode. Exiting...")
             exit(1)
 
         # convert the raw message data to binary
-        binary_data = str_to_bin(args.data)
+        binary_data = str_to_bin(data)
 
         # encode the message in the image
         new_image = encode_message(image, binary_data, common_reds)
 
-        # save the new image to disk
-        save_image(new_image, args.out or f"new.{args.source}")
+        if new_image:
+
+            # save the new image to disk
+            save_image(new_image, args.out or f"new.{args.source}")
 
     elif args.decode:
         # extract the raw binary from the image
@@ -333,5 +368,6 @@ if __name__ == "__main__":
 
             log.info(f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET} {decoded_message}")
 
-    print(f"\n\n{ICON}")
+
+    print(f"{GREEN}\n\n{ICON}{RESET}")
     log.info(f"{GREEN}All steps completed.{RESET}")
