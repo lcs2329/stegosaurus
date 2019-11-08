@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 
 import argparse
-import binascii
 import hashlib
 import logging
 import os
 from collections import Counter
 
 import coloredlogs
-import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
@@ -43,7 +41,7 @@ def open_image(image_path: str) -> Image:
         log.error(f"Image '{args.source}' not found.")
         return
 
-    log.info(f"{YELLOW}{ITALICS}Opening image '{image_path}'...'{RESET}")
+    log.info(f"{YELLOW}{ITALICS}Opening image '{image_path}'...{RESET}")
     try:
         image = Image.open(image_path, "r")
     except:
@@ -59,7 +57,7 @@ def open_file(file_path: str) -> str:
         log.error(f"File '{file_path}' not found.")
         return
 
-    log.info(f"{YELLOW}{ITALICS}Opening file '{file_path}'...'{RESET}")
+    log.info(f"{YELLOW}{ITALICS}Opening file '{file_path}'...{RESET}")
     
     try:
         with open(file_path, "r") as data_file:
@@ -70,7 +68,6 @@ def open_file(file_path: str) -> str:
     
     log.debug(f"Data read from '{file_path}': {data}")
     return data
-
 
 
 def save_image(image: Image, path: str) -> None:
@@ -87,24 +84,7 @@ def save_image(image: Image, path: str) -> None:
         log.exception(f"Unable to save image to '{path}'.")
         return
 
-    log.debug(f"Image saved to '{path}' successfully. ")
-
-
-def create_image(x: int, y: int) -> Image:
-    """
-    Create a new image with the given size.
-    :param x: image width
-    :param y: image height
-    :return: new image with dimensions x * y
-    """
-    log.debug(f"Creating new image of size {x} x {y}...")
-    try:
-        image = Image.new("RGB", (x, y))
-    except:
-        log.exception("Unable to create new image.")
-        return
-
-    return image
+    log.debug(f"Image saved to '{path}' successfully.")
 
 
 def get_pixel(image: Image, x: int, y: int) -> tuple:
@@ -185,6 +165,11 @@ def bin_to_str(bits: str) -> str:
 
 
 def hash_str(data):
+    """
+    Generate a binary representation of an MD5 hash of a string.
+    :param data: data to be hashed
+    :return: binary MD5 hash
+    """
     hash_object = hashlib.md5(data.encode())
     hex_hash = hash_object.hexdigest()
     binary_of_hash = bin(int(hex_hash, 16))[2:]
