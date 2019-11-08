@@ -8,6 +8,7 @@ from collections import Counter
 
 import coloredlogs
 import numpy as np
+from tqdm import tqdm
 from PIL import Image
 
 log = logging.getLogger(__name__)
@@ -58,14 +59,14 @@ def open_file(file_path: str) -> str:
         return
 
     log.info(f"{YELLOW}{ITALICS}Opening file '{file_path}'...{RESET}")
-    
+
     try:
         with open(file_path, "r") as data_file:
             data = data_file.read()
     except:
         log.exception(f"Unable to parse data file '{file_path}'.")
         return
-    
+
     log.debug(f"Data read from '{file_path}': {data}")
     return data
 
@@ -77,7 +78,7 @@ def save_image(image: Image, path: str) -> None:
     :param path: path to save the image to
     :return: None
     """
-    log.info(f"Saving image to '{path}'...")
+    log.info(f"{YELLOW}{ITALICS}Saving image to '{path}'...{RESET}")
     try:
         image.save(path, "png")
     except:
@@ -180,7 +181,7 @@ def hash_str(data):
     return str(binary_of_hash)
 
 
-def encode_message(image: Image, data: str, target_reds) -> Image:
+def encode_message(image: Image, data: str, target_reds: list) -> Image:
     """
     Encode a message into an image.
     :param image: image to be encoded into
@@ -189,7 +190,7 @@ def encode_message(image: Image, data: str, target_reds) -> Image:
         for data encoding
     :return: new image with data encoded inside
     """
-    log.info(f"{YELLOW}{ITALICS}Encoding data...'{RESET}")
+    log.info(f"{YELLOW}{ITALICS}Encoding data...{RESET}")
 
     data_hash = hash_str(data)
     log.debug(f"Hash of '{data}' is {data_hash} (length: {len(data_hash)})")
@@ -202,37 +203,43 @@ def encode_message(image: Image, data: str, target_reds) -> Image:
 
     data_index = 0
     hash_index = 0
-    for x in range(width):
-        for y in range(height):
-            # start in the top left and work through the image
-            pixel = list(image.getpixel((x, y)))
+    with tqdm(total=len(data) + 128, leave=False) as pbar:
+        for x in range(width):
+            for y in range(height):
+                # start in the top left and work through the image
+                pixel = list(image.getpixel((x, y)))
 
-            if pixel[0] in target_reds:
+                if pixel[0] in target_reds:
 
-                # if we still have data to encode
-                if data_index < len(data):
+                    # if we still have data to encode
+                    if data_index < len(data):
 
-                    # if the data bit is 1, set the image bit to 1
-                    # if the data bit is 0, keep it at 0
-                    pixel[2] = pixel[2] & ~1 | int(data[data_index])
-                    data_index += 1
+                        # if the data bit is 1, set the image bit to 1
+                        # if the data bit is 0, keep it at 0
+                        pixel[2] = pixel[2] & ~1 | int(data[data_index])
+                        data_index += 1
+                        pbar.update(1)
 
-                # if we still have some of our hash to encode
-                if hash_index < len(data_hash):
-                    pixel[1] = pixel[1] & ~1 | int(data_hash[hash_index])
-                    hash_index += 1
+                    # if we still have some of our hash to encode
+                    if hash_index < len(data_hash):
+                        pixel[1] = pixel[1] & ~1 | int(data_hash[hash_index])
+                        hash_index += 1
+                        pbar.update(1)
 
-                # set pixel in new image
-                new_image.putpixel((x, y), tuple(pixel))
+                    # set pixel in new image
+                    new_image.putpixel((x, y), tuple(pixel))
+
+                    if data_index == len(data) and hash_index == len(data_hash):
+                        return new_image
 
     if data_index < len(data):
         log.error("Not enough bits to encode data within the image.")
         return
 
-    return new_image
+    # return new_image
 
 
-def decode_message(image: Image, target_reds) -> str:
+def decode_message(image: Image, target_reds: list) -> str:
     """
     Extract a message from an encoded image.
     :param image: image to have message extracted from
@@ -240,7 +247,7 @@ def decode_message(image: Image, target_reds) -> str:
         for data decoding
     :return: string extracted from the image
     """
-    log.info(f"{YELLOW}{ITALICS}Decoding data...'{RESET}")
+    log.info(f"{YELLOW}{ITALICS}Decoding data...{RESET}")
 
     extracted_bin = ""
     log.debug(f"Target reds are {target_reds}...")
@@ -254,7 +261,7 @@ def decode_message(image: Image, target_reds) -> str:
 
             if len(data_hash) < 128:
 
-                pixel = list(image.getpixel((x,y)))
+                pixel = list(image.getpixel((x, y)))
 
                 if pixel[0] in target_reds:
                     extracted_bit = pixel[1] & 1
@@ -263,23 +270,26 @@ def decode_message(image: Image, target_reds) -> str:
                 break
 
     log.debug(f"Extracted hash: {data_hash}, length: {len(data_hash)}")
+    with tqdm(total=width * height, leave=False) as pbar:
+        for x in range(0, width):
+            for y in range(0, height):
+                # go through each pixel of the image
+                pixel = list(image.getpixel((x, y)))
 
-    for x in range(0, width):
-        for y in range(0, height):
-            # go through each pixel of the image
-            pixel = list(image.getpixel((x, y)))
+                if pixel[0] in target_reds:
+                    extracted_bit = pixel[2] & 1
+                    extracted_bin += str(extracted_bit)
 
-            if pixel[0] in target_reds:
-                extracted_bit = pixel[2] & 1
-                extracted_bin += str(extracted_bit)
+                    hash_of_extracted = hash_str(extracted_bin)
 
-                hash_of_extracted = hash_str(extracted_bin)
-                
-                if str(hash_of_extracted) == str(data_hash):
-                    log.debug(f"Found hash!")
-                    return extracted_bin
+                    if str(hash_of_extracted) == str(data_hash):
+                        log.debug(f"Found hash!")
+                        return extracted_bin
 
-    log.error("No data found.")     
+                pbar.update(1)
+            pbar.update(1)
+
+    log.error("No data found.")
     return None
 
 
@@ -294,7 +304,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-o", "--out", type=str, default=None, help="Destination image."
     )
-    parser.add_argument("-f", "--file", type=str)
+    parser.add_argument("-f", "--file", type=str, help="Filepath of data to hide.")
     parser.add_argument("--data", type=str, help="String to hide.")
     parser.add_argument(
         "-v",
@@ -352,7 +362,6 @@ if __name__ == "__main__":
             decoded_message = bin_to_str(decoded_binary)
 
             log.info(f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET} {decoded_message}")
-
 
     print(f"{GREEN}\n\n{ICON}{RESET}")
     log.info(f"{GREEN}All steps completed.{RESET}")
