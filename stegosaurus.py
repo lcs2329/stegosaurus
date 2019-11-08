@@ -5,6 +5,7 @@ import binascii
 import logging
 import os
 
+import hashlib
 import coloredlogs
 import numpy as np
 from PIL import Image
@@ -152,7 +153,7 @@ def bin_to_str(bits: str) -> str:
     :param bits: binary string to convert
     :return: UTF8 encoded string (e.g. "hello")
     """
-    log.debug(f"Attempting to convert {bits} to UTF8...")
+    log.debug(f"Attempting to convert extracted binary to UTF8...")
     n = int(bits, 2)
     try:
         data = (
@@ -167,78 +168,107 @@ def bin_to_str(bits: str) -> str:
     return data
 
 
-def encode_message(image: Image, data: str, target_red) -> Image:
+def hash_str(data):
+    hash_object = hashlib.md5(data.encode())
+    hex_hash = hash_object.hexdigest()
+    binary_of_hash = bin(int(hex_hash, 16))[2:]
+
+    #log.debug(f"hash of '{data}': {binary_of_hash} (length: {len(binary_of_hash)})")
+    while len(binary_of_hash) != 128:
+        binary_of_hash += "0"
+
+    return str(binary_of_hash)
+
+
+def encode_message(image: Image, data: str, target_reds) -> Image:
     """
     Encode a message into an image.
     :param image: image to be encoded into
     :param data: string data to be encoded into the image
     :return: new image with data encoded inside
     """
-    # 🦕
-    stop = "11110000100111111010011010010101"
-    data += stop
+    data_hash = hash_str(data)
+    log.debug(f"Hash of '{data}' is {data_hash} (length: {len(data_hash)})")
 
     # create new image & pixel map
     new_image = image.copy()
 
     width, height = image.size
-    log.debug(f"Target red is {target_red}...")
-    time.sleep(3)
+    log.debug(f"Target reds are {target_reds}...")
 
-    i = 0
+    data_index = 0
+    hash_index = 0
     for x in range(width):
         for y in range(height):
             # start in the top left and work through the image
             pixel = list(image.getpixel((x, y)))
 
-            if pixel[0] == target_red:
+            if pixel[0] in target_reds:
 
                 # if we still have data to encode
-                if i < len(data):
+                if data_index < len(data):
 
                     # if the data bit is 1, set the image bit to 1
                     # if the data bit is 0, keep it at 0
-                    pixel[1] = pixel[1] & ~1 | int(data[i])
-                    i += 1
+                    pixel[2] = pixel[2] & ~1 | int(data[data_index])
+                    data_index += 1
 
-            # set pixel in new image
-            new_image.putpixel((x, y), tuple(pixel))
+                # if we still have some of our hash to encode
+                if hash_index < len(data_hash):
+                    pixel[1] = pixel[1] & ~1 | int(data_hash[hash_index])
+                    hash_index += 1
+
+                # set pixel in new image
+                new_image.putpixel((x, y), tuple(pixel))
 
     return new_image
 
 
-def decode_message(image: Image, target_red) -> str:
+def decode_message(image: Image, target_reds) -> str:
     """
     Extract a message from an encoded image.
     :param image: image to have message extracted from
     :return: string extracted from the image
     """
     extracted_bin = ""
-    # 🦕
-    stop = "11110000100111111010011010010101"
-    # stop = [int(i) for i in stop]
-    buffer = deque()
-    log.debug(f"Target red is {target_red}...")
+    log.debug(f"Target reds are {target_reds}...")
 
     width, height = image.size
+
+    # first, extract the hash
+    data_hash = ""
+    for x in range(0, width):
+        for y in range(0, height):
+
+            if len(data_hash) < 128:
+
+                pixel = list(image.getpixel((x,y)))
+
+                if pixel[0] in target_reds:
+                    extracted_bit = pixel[1] & 1
+                    data_hash += str(extracted_bit)
+            else:
+                break
+
+    log.debug(f"Extracted hash: {data_hash}, length: {len(data_hash)}")
+
     for x in range(0, width):
         for y in range(0, height):
             # go through each pixel of the image
             pixel = list(image.getpixel((x, y)))
 
-            if pixel[0] == target_red:
-                extracted_bit = pixel[1] & 1
+            if pixel[0] in target_reds:
+                extracted_bit = pixel[2] & 1
                 extracted_bin += str(extracted_bit)
 
-                if len(extracted_bin) > len(stop):
-                    extracted = extracted_bin[len(extracted_bin) - len(stop) - 1 : -1]
-                    if extracted == stop:
-                        log.debug(f"Found stop after {extracted}")
-                        return extracted_bin[: len(extracted_bin) - len(stop) - 1]
-                    else:
-                        log.debug(extracted_bin)
+                hash_of_extracted = hash_str(extracted_bin)
+                
+                if str(hash_of_extracted) == str(data_hash):
+                    log.debug(f"Found hash!")
+                    return extracted_bin
 
-    # log.debug(f"Extracted binary: {extracted_bin}")
+    log.error("No data found.")     
+    return None
 
 
 if __name__ == "__main__":
@@ -288,19 +318,20 @@ if __name__ == "__main__":
         binary_data = str_to_bin(args.data)
 
         # encode the message in the image
-        new_image = encode_message(image, binary_data, common_reds[0])
+        new_image = encode_message(image, binary_data, common_reds)
 
         # save the new image to disk
         save_image(new_image, args.out or f"new.{args.source}")
 
     elif args.decode:
         # extract the raw binary from the image
-        decoded_binary = decode_message(image, common_reds[0])
+        decoded_binary = decode_message(image, common_reds)
 
         # convert the extracted binary to a UTF8 decoded string
-        decoded_message = bin_to_str(decoded_binary)
+        if decoded_binary:
+            decoded_message = bin_to_str(decoded_binary)
 
-        log.info(f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET} {decoded_message}")
+            log.info(f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET} {decoded_message}")
 
     print(f"\n\n{ICON}")
     log.info(f"{GREEN}All steps completed.{RESET}")
