@@ -109,7 +109,14 @@ def get_target_reds(image: Image, n=5) -> list:
     # extract the raw red value (0-255)
     reds = [item[0] for item in most_common_reds]
 
-    return reds
+    total_pixel_ct = 0
+    for color in colors:
+        if color[1][0] in reds:
+            total_pixel_ct += color[0]
+
+    log.debug(f"Total available pixels: {total_pixel_ct}")
+
+    return reds, total_pixel_ct
 
 
 def str_to_bin(data: str) -> str:
@@ -365,7 +372,7 @@ if __name__ == "__main__":
 
     # we will use the reds in the image to encode our message, in order of
     # most dominant red value in the image (from 0-255)
-    target_reds = get_target_reds(image, n=20)
+    target_reds, total_pixel_ct = get_target_reds(image, n=20)
 
     if args.encode:
 
@@ -382,6 +389,14 @@ if __name__ == "__main__":
 
         # convert the raw message data to binary
         binary_data = str_to_bin(data)
+
+        if len(binary_data) > total_pixel_ct:
+            log.error(f"Not enough pixels to encode inputted data into {args.source}. ")
+            log.error(
+                f"Total data length is {len(binary_data)} bits, but only "
+                f"{total_pixel_ct} encodable bits are available. Try a larger image."
+            )
+            exit(1)
 
         # encode the message in the image
         new_image = encode_message(image, binary_data, target_reds)
