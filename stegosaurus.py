@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 
+"""
+stegosaurus.py
+Encode hidden messages into image files.
+"""
+
 import argparse
 import hashlib
 import logging
@@ -110,6 +115,7 @@ def get_target_reds(image: Image, n=5) -> list:
     # extract the raw red value (0-255)
     reds = [item[0] for item in most_common_reds]
 
+    # calculate the total number of pixels we have to encode data into
     total_pixel_ct = 0
     for color in colors:
         if color[1][0] in reds:
@@ -194,15 +200,6 @@ def hash_str(data: str) -> str:
     return str(binary_of_hash)
 
 
-def get_hash(data):
-    size_hashed = hashlib.md5(data.encode()).hexdigest()
-    binary_of_hash = bin(int(size_hashed, 16))[2:]
-    while len(binary_of_hash) < 128:
-        binary_of_hash += "0"
-    return binary_of_hash
-
-
-
 def encode_message(image: Image, data: str, target_reds: list, total_pixel_ct) -> Image:
     """
     Encode a message into an image.
@@ -210,11 +207,14 @@ def encode_message(image: Image, data: str, target_reds: list, total_pixel_ct) -
     :param data: string data to be encoded into the image
     :param target_reds: most common red values that will serve as the indexes
         for data encoding
+    :param total_pixel_ct: total number of pixels in the image that we have
+        for data encoding
     :return: new image with data encoded inside
     """
     log.info(f"{YELLOW}{ITALICS}Encoding data...{RESET}")
 
-    hash_of_length = get_hash(str(len(data)))
+    # calculate the hash of the total data length
+    hash_of_length = hash_str(str(len(data)))
     log.debug(f"Total data length: {len(data)}")
     
     # create new image & pixel map
@@ -276,6 +276,8 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct) -> str:
     :param image: image to have message extracted from
     :param target_reds: red values that will serve as the indexes for data 
         decoding, in order of dominance
+    :param total_pixel_ct: total number of pixels in the image that we have
+        for data encoding
     :return: binary data extracted from the image
     """
     log.info(f"{YELLOW}{ITALICS}Decoding data...{RESET}")
@@ -306,24 +308,31 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct) -> str:
         if len(size_hash) == 128:
             break            
 
-    log.debug(f"Extracted hash: {size_hash} (length: {len(size_hash)})")
+    log.debug(f"Extracted hash: {size_hash} (length: {len(size_hash)} bits)")
 
+    # iterate a counter, calculating the hash of the counter until the hash
+    # of the counter matches the hash of the data length. once it matches,
+    # we will know exactly how many bits we have to extract from the image
+    # until we have our complete message.
     total_data_length = 0
-    index_hash = get_hash(str(total_data_length))
+    index_hash = hash_str(str(total_data_length))
+
     while index_hash != size_hash:
         total_data_length += 1
-        index_hash = get_hash(str(total_data_length))
+        index_hash = hash_str(str(total_data_length))
 
-    log.debug(f"Found total data length: {total_data_length}")
+    log.debug(f"Total encoded data length: {total_data_length} bits")
 
     extracted_bin = ""
-    # show a progress bar equivalent to all of the pixels in the image
-    # (worse case, we would have to check everything)
+
+    # show a progress bar equivalent to total encoded data length
     with tqdm(total=total_data_length, leave=False) as pbar:
 
         for x in range(0, width):
             for y in range(0, height):
 
+                # if the length of our extracted binary matches,
+                # then we're done
                 if len(extracted_bin) >= total_data_length:
                     return extracted_bin
 
@@ -336,7 +345,6 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct) -> str:
                     extracted_bit = pixel[2] & 1
                     extracted_bin += str(extracted_bit)
                     pbar.update(1)
-
 
     # if we got this far, we didnt find data equivalent to our hash
     log.error("No data found.")
@@ -401,6 +409,8 @@ if __name__ == "__main__":
         # convert the raw message data to binary
         binary_data = str_to_bin(data)
                     
+        # we can only encode as many bits as there are pixels, so ensure we 
+        # can pull this shindig off with what we have
         if len(binary_data) > total_pixel_ct:
             log.error(f"Not enough pixels to encode inputted data into {args.source}. ")
             log.error(
@@ -414,8 +424,8 @@ if __name__ == "__main__":
  
         # if we were able to actually encode everything, then save the image
         if new_image:
-
             save_image(new_image, args.out or f"new.{args.source}")
+
 
     elif args.decode:
         # extract the raw binary from the image
