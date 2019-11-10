@@ -8,8 +8,8 @@ Encode hidden messages into image files.
 """
 todo:
     - video
-    - write file out
     - zip
+    - use the green channel past 128 bits
 """
 
 import argparse
@@ -121,7 +121,7 @@ def save_image(image: Image, path: str) -> None:
     log.debug(f"Image saved to '{path}' successfully.")
 
 
-def get_target_reds(image: Image, n=5) -> list:
+def get_target_reds(image: Image) -> list:
     """
     Get the n most common pixel values.
     :param image: An image to analyze for common pixel values.
@@ -136,8 +136,15 @@ def get_target_reds(image: Image, n=5) -> list:
     # get the first val (red)
     reds = [pixel[1][0] for pixel in colors]
 
+    # find all of the red values from 0-255 that are not in our image
+    not_in_reds = [r for r in range(0, 255) if r not in set(reds)]
+
+    # we will use the top 1/3 of the most common pixel values in order
+    # to encode our data
+    target_count = int((len(set(reds)) - len(not_in_reds)) / 3)
+
     # sort the list by the most dominant reds
-    most_common_reds = Counter(reds).most_common(n)
+    most_common_reds = Counter(reds).most_common(target_count)
 
     # extract the raw red value (0-255)
     reds = [item[0] for item in most_common_reds]
@@ -243,7 +250,7 @@ def encode_message(image: Image, data: str, target_reds: list, total_pixel_ct) -
     # calculate the hash of the total data length
     hash_of_length = hash_str(str(len(data)))
     log.debug(f"Total data length: {len(data)}")
-
+    
     # create new image & pixel map
     new_image = image.copy()
 
@@ -333,7 +340,7 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct) -> str:
                 break
 
         if len(size_hash) == 128:
-            break
+            break            
 
     log.debug(f"Extracted hash: {size_hash} (length: {len(size_hash)} bits)")
 
@@ -386,7 +393,9 @@ if __name__ == "__main__":
     group.add_argument("-d", "--decode", action="store_true", help="Decode an image.")
 
     parser.add_argument("-s", "--source", type=str, required=True, help="Source image.")
-    parser.add_argument("-o", "--out", type=str, default=None, help="Destination file.")
+    parser.add_argument(
+        "-o", "--out", type=str, default=None, help="Destination file."
+    )
     parser.add_argument("-f", "--file", type=str, help="Filepath of data to hide.")
     parser.add_argument("--data", type=str, help="String to hide.")
     parser.add_argument(
@@ -416,7 +425,7 @@ if __name__ == "__main__":
 
     # we will use the reds in the image to encode our message, in order of
     # most dominant red value in the image (from 0-255)
-    target_reds, total_pixel_ct = get_target_reds(image, n=20)
+    target_reds, total_pixel_ct = get_target_reds(image)
 
     if args.encode:
 
@@ -433,8 +442,8 @@ if __name__ == "__main__":
 
         # convert the raw message data to binary
         binary_data = str_to_bin(data)
-
-        # we can only encode as many bits as there are pixels, so ensure we
+                    
+        # we can only encode as many bits as there are pixels, so ensure we 
         # can pull this shindig off with what we have
         if len(binary_data) > total_pixel_ct:
             log.error(f"Not enough pixels to encode inputted data into {args.source}. ")
@@ -446,10 +455,11 @@ if __name__ == "__main__":
 
         # encode the message in the image
         new_image = encode_message(image, binary_data, target_reds, total_pixel_ct)
-
+ 
         # if we were able to actually encode everything, then save the image
         if new_image:
             save_image(new_image, args.out or f"new.{args.source}")
+
 
     elif args.decode:
         # extract the raw binary from the image
