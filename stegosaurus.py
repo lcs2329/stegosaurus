@@ -5,6 +5,13 @@ stegosaurus.py
 Encode hidden messages into image files.
 """
 
+"""
+todo:
+    - video
+    - write file out
+    - zip
+"""
+
 import argparse
 import hashlib
 import logging
@@ -75,6 +82,15 @@ def open_file(file_path: str) -> str:
 
     log.debug(f"Data read from '{file_path}': {data}")
     return data
+
+
+def save_file(data: str, filename: str) -> None:
+    try:
+        with open(filename, "w") as output_file:
+            output_file.write(data)
+    except OSError:
+        log.error(f"Unable to write data to '{filename}'")
+
 
 
 def save_image(image: Image, path: str) -> None:
@@ -360,7 +376,7 @@ if __name__ == "__main__":
 
     parser.add_argument("-s", "--source", type=str, required=True, help="Source image.")
     parser.add_argument(
-        "-o", "--out", type=str, default=None, help="Destination image."
+        "-o", "--out", type=str, default=None, help="Destination file."
     )
     parser.add_argument("-f", "--file", type=str, help="Filepath of data to hide.")
     parser.add_argument("--data", type=str, help="String to hide.")
@@ -434,6 +450,9 @@ if __name__ == "__main__":
         # convert the extracted binary to a UTF8 decoded string, if we pulled it
         if decoded_binary:
             decoded_message = bin_to_str(decoded_binary)
+
+            if args.out:
+                save_file(decoded_message, args.out)
 
             log.info(f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET} {decoded_message}")
 
