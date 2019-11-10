@@ -67,6 +67,11 @@ def open_image(image_path: str) -> Image:
 
 
 def open_file(file_path: str) -> str:
+    """
+    Read a file and return the data inside of it.
+    :param file_path: name of the file to be created
+    :return: Data inside the file
+    """
     if not os.path.exists(file_path):
         log.error(f"File '{file_path}' not found.")
         return
@@ -84,13 +89,19 @@ def open_file(file_path: str) -> str:
     return data
 
 
-def save_file(data: str, filename: str) -> None:
+def save_file(data: str, file_path: str) -> None:
+    """
+    Save decoded data to a file.
+    :param data: data to be written to the file
+    :param file_path: name of the file to be created
+    :return: None
+    """
+    log.debug(f"Writing output data to '{file_path}'...")
     try:
-        with open(filename, "w") as output_file:
+        with open(file_path, "w") as output_file:
             output_file.write(data)
     except OSError:
-        log.error(f"Unable to write data to '{filename}'")
-
+        log.error(f"Unable to write data to '{file_path}'")
 
 
 def save_image(image: Image, path: str) -> None:
@@ -232,7 +243,7 @@ def encode_message(image: Image, data: str, target_reds: list, total_pixel_ct) -
     # calculate the hash of the total data length
     hash_of_length = hash_str(str(len(data)))
     log.debug(f"Total data length: {len(data)}")
-    
+
     # create new image & pixel map
     new_image = image.copy()
 
@@ -322,7 +333,7 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct) -> str:
                 break
 
         if len(size_hash) == 128:
-            break            
+            break
 
     log.debug(f"Extracted hash: {size_hash} (length: {len(size_hash)} bits)")
 
@@ -375,9 +386,7 @@ if __name__ == "__main__":
     group.add_argument("-d", "--decode", action="store_true", help="Decode an image.")
 
     parser.add_argument("-s", "--source", type=str, required=True, help="Source image.")
-    parser.add_argument(
-        "-o", "--out", type=str, default=None, help="Destination file."
-    )
+    parser.add_argument("-o", "--out", type=str, default=None, help="Destination file.")
     parser.add_argument("-f", "--file", type=str, help="Filepath of data to hide.")
     parser.add_argument("--data", type=str, help="String to hide.")
     parser.add_argument(
@@ -424,8 +433,8 @@ if __name__ == "__main__":
 
         # convert the raw message data to binary
         binary_data = str_to_bin(data)
-                    
-        # we can only encode as many bits as there are pixels, so ensure we 
+
+        # we can only encode as many bits as there are pixels, so ensure we
         # can pull this shindig off with what we have
         if len(binary_data) > total_pixel_ct:
             log.error(f"Not enough pixels to encode inputted data into {args.source}. ")
@@ -437,11 +446,10 @@ if __name__ == "__main__":
 
         # encode the message in the image
         new_image = encode_message(image, binary_data, target_reds, total_pixel_ct)
- 
+
         # if we were able to actually encode everything, then save the image
         if new_image:
             save_image(new_image, args.out or f"new.{args.source}")
-
 
     elif args.decode:
         # extract the raw binary from the image
