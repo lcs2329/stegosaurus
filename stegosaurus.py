@@ -216,19 +216,7 @@ def encode_message(image: Image, data: str, target_reds: list, total_pixel_ct) -
 
     hash_of_length = get_hash(str(len(data)))
     log.debug(f"Total data length: {len(data)}")
-
-    data_length_in_binary = bin(int(len(data)))[2:]
-    log.debug(f"Data length in binary: {data_length_in_binary} ({len(data)})")
-
-    total_reds_in_binary = bin(int(total_pixel_ct))[2:]
     
-    while len(data_length_in_binary) < total_reds_in_binary.bit_length():
-        data_length_in_binary += "0"
-
-    log.debug(f"Data length in binary:   {data_length_in_binary} ({len(data)})")
-    log.debug(f"Total red target pixels: {total_reds_in_binary} ({total_pixel_ct})")
-
-
     # create new image & pixel map
     new_image = image.copy()
 
@@ -329,7 +317,8 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct) -> str:
     log.debug(f"Found total data length: {total_data_length}")
 
     extracted_bin = ""
-    # show a progress bar equivalent to all of the pixels we need to pull
+    # show a progress bar equivalent to all of the pixels in the image
+    # (worse case, we would have to check everything)
     with tqdm(total=total_data_length, leave=False) as pbar:
 
         for x in range(0, width):
