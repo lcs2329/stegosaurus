@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import logging
 import os
+from math import log2, floor
 from collections import Counter
 
 import coloredlogs
@@ -125,13 +126,13 @@ def str_to_bin(data: str) -> str:
     :param data: string to convert
     :return: binary string (e.g. "10010001100101110110011011001101111")
     """
+    log.debug(f"Attempting to convert data to binary...")
     try:
         encoded_data = data.encode("utf-8", "surrogatepass")
     except UnicodeEncodeError:
         log.exception(f"Unable to encode '{data}'.")
         return
 
-    log.debug(f"Attempting to convert {data} to binary...")
     try:
         bits = bin(int.from_bytes(encoded_data, "big"))[2:]
         binary = bits.zfill(8 * ((len(bits) + 7) // 8))
@@ -139,7 +140,6 @@ def str_to_bin(data: str) -> str:
         log.exception(f"Unable to convert '{encoded_data}' to binary.")
         return
 
-    log.debug(f"{data} = {binary}")
     return binary
 
 
@@ -194,7 +194,16 @@ def hash_str(data: str) -> str:
     return str(binary_of_hash)
 
 
-def encode_message(image: Image, data: str, target_reds: list) -> Image:
+def get_hash(data):
+    size_hashed = hashlib.md5(data.encode()).hexdigest()
+    binary_of_hash = bin(int(size_hashed, 16))[2:]
+    while len(binary_of_hash) < 128:
+        binary_of_hash += "0"
+    return binary_of_hash
+
+
+
+def encode_message(image: Image, data: str, target_reds: list, total_pixel_ct) -> Image:
     """
     Encode a message into an image.
     :param image: image to be encoded into
@@ -205,9 +214,20 @@ def encode_message(image: Image, data: str, target_reds: list) -> Image:
     """
     log.info(f"{YELLOW}{ITALICS}Encoding data...{RESET}")
 
-    # get an MD5 hash of our data
-    data_hash = hash_str(data)
-    log.debug(f"Hash of '{data}' is {data_hash} (length: {len(data_hash)})")
+    hash_of_length = get_hash(str(len(data)))
+    log.debug(f"Total data length: {len(data)}")
+
+    data_length_in_binary = bin(int(len(data)))[2:]
+    log.debug(f"Data length in binary: {data_length_in_binary} ({len(data)})")
+
+    total_reds_in_binary = bin(int(total_pixel_ct))[2:]
+    
+    while len(data_length_in_binary) < total_reds_in_binary.bit_length():
+        data_length_in_binary += "0"
+
+    log.debug(f"Data length in binary:   {data_length_in_binary} ({len(data)})")
+    log.debug(f"Total red target pixels: {total_reds_in_binary} ({total_pixel_ct})")
+
 
     # create new image & pixel map
     new_image = image.copy()
@@ -243,8 +263,8 @@ def encode_message(image: Image, data: str, target_reds: list) -> Image:
 
                     # if we still have some of our hash to encode, then encode
                     # the current hash bit into the LSB of the green channel
-                    if hash_index < len(data_hash):
-                        pixel[1] = pixel[1] & ~1 | int(data_hash[hash_index])
+                    if hash_index < len(hash_of_length):
+                        pixel[1] = pixel[1] & ~1 | int(hash_of_length[hash_index])
                         hash_index += 1
                         pbar.update(1)
 
@@ -252,7 +272,7 @@ def encode_message(image: Image, data: str, target_reds: list) -> Image:
                     new_image.putpixel((x, y), tuple(pixel))
 
                     # if we have written our hash and our data, then we are done
-                    if data_index == len(data) and hash_index == len(data_hash):
+                    if data_index == len(data) and hash_index == len(hash_of_length):
                         return new_image
 
     # if we still have data to write, then we didn't have enough pixels
@@ -262,7 +282,7 @@ def encode_message(image: Image, data: str, target_reds: list) -> Image:
         return
 
 
-def decode_message(image: Image, target_reds: list) -> str:
+def decode_message(image: Image, target_reds: list, total_pixel_ct) -> str:
     """
     Extract a message from an encoded image.
     :param image: image to have message extracted from
@@ -272,18 +292,16 @@ def decode_message(image: Image, target_reds: list) -> str:
     """
     log.info(f"{YELLOW}{ITALICS}Decoding data...{RESET}")
 
-    extracted_bin = ""
-
     width, height = image.size
 
     # first, extract the hash. the hash will be encoded into the LSB
     # of the green channels for each pixel in the reds, in order of dominance
-    data_hash = ""
+    size_hash = ""
     for x in range(0, width):
         for y in range(0, height):
 
             # an MD5 hash is 128 bits, so keep going until we get all 128
-            if len(data_hash) < 128:
+            if len(size_hash) < 128:
 
                 # extract the pixel tuple (R, G, B)
                 pixel = list(image.getpixel((x, y)))
@@ -291,20 +309,34 @@ def decode_message(image: Image, target_reds: list) -> str:
                 # if the R is in our target reds, extract the LSB
                 if pixel[0] in target_reds:
                     extracted_bit = pixel[1] & 1
-                    data_hash += str(extracted_bit)
+                    size_hash += str(extracted_bit)
 
             # we have our full hash, so we can break
             else:
                 break
 
-    log.debug(f"Extracted hash: {data_hash} (length: {len(data_hash)})")
+        if len(size_hash) == 128:
+            break            
 
-    # show a progress bar equivalent to all of the pixels in the image
-    # (worse case, we would have to check everything)
-    with tqdm(total=width * height, leave=False) as pbar:
+    log.debug(f"Extracted hash: {size_hash} (length: {len(size_hash)})")
+
+    total_data_length = 0
+    index_hash = get_hash(str(total_data_length))
+    while index_hash != size_hash:
+        total_data_length += 1
+        index_hash = get_hash(str(total_data_length))
+
+    log.debug(f"Found total data length: {total_data_length}")
+
+    extracted_bin = ""
+    # show a progress bar equivalent to all of the pixels we need to pull
+    with tqdm(total=total_data_length, leave=False) as pbar:
 
         for x in range(0, width):
             for y in range(0, height):
+
+                if len(extracted_bin) >= total_data_length:
+                    return extracted_bin
 
                 # extract the pixel tuple (R, G, B)
                 pixel = list(image.getpixel((x, y)))
@@ -314,18 +346,8 @@ def decode_message(image: Image, target_reds: list) -> str:
 
                     extracted_bit = pixel[2] & 1
                     extracted_bin += str(extracted_bit)
+                    pbar.update(1)
 
-                    # calculate the hash of the bit string we have extracted
-                    # thus far. if it is equal to the hash we extracted earlier
-                    # from the green channel, we have our full message
-                    hash_of_extracted = hash_str(extracted_bin)
-
-                    if str(hash_of_extracted) == str(data_hash):
-                        log.debug(f"Found hash! Extracted binary is {extracted_bin}")
-                        return extracted_bin
-
-                pbar.update(1)
-            pbar.update(1)
 
     # if we got this far, we didnt find data equivalent to our hash
     log.error("No data found.")
@@ -389,7 +411,7 @@ if __name__ == "__main__":
 
         # convert the raw message data to binary
         binary_data = str_to_bin(data)
-
+                    
         if len(binary_data) > total_pixel_ct:
             log.error(f"Not enough pixels to encode inputted data into {args.source}. ")
             log.error(
@@ -399,8 +421,8 @@ if __name__ == "__main__":
             exit(1)
 
         # encode the message in the image
-        new_image = encode_message(image, binary_data, target_reds)
-
+        new_image = encode_message(image, binary_data, target_reds, total_pixel_ct)
+ 
         # if we were able to actually encode everything, then save the image
         if new_image:
 
@@ -408,7 +430,7 @@ if __name__ == "__main__":
 
     elif args.decode:
         # extract the raw binary from the image
-        decoded_binary = decode_message(image, target_reds)
+        decoded_binary = decode_message(image, target_reds, total_pixel_ct)
 
         # convert the extracted binary to a UTF8 decoded string, if we pulled it
         if decoded_binary:
