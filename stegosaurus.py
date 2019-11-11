@@ -19,6 +19,7 @@ import logging
 import os
 import zlib
 from collections import Counter
+from datetime import datetime
 from math import floor, log2
 
 import coloredlogs
@@ -416,6 +417,8 @@ if __name__ == "__main__":
             level="DEBUG", fmt="[%(asctime)s] [%(levelname)-8s] %(message)s", logger=log
         )
 
+    start_time = datetime.now()
+
     image = open_image(args.source)
     if not image:
         exit(1)
@@ -472,4 +475,5 @@ if __name__ == "__main__":
                 log.info(f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET} {decoded_message}")
 
     print(f"{GREEN}\n\n{ICON}{RESET}")
+    log.debug(f"Total elapsed time: {datetime.now() - start_time}")
     log.info(f"{GREEN}All steps completed.{RESET}")
