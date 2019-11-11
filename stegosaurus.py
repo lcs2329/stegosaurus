@@ -13,11 +13,13 @@ todo:
 """
 
 import argparse
+import binascii
 import hashlib
 import logging
 import os
-from math import log2, floor
+import zlib
 from collections import Counter
+from math import floor, log2
 
 import coloredlogs
 import numpy as np
@@ -66,27 +68,21 @@ def open_image(image_path: str) -> Image:
     return image
 
 
-def open_file(file_path: str) -> str:
+def save_image(image: Image, image_path: str) -> None:
     """
-    Read a file and return the data inside of it.
-    :param file_path: name of the file to be created
-    :return: Data inside the file
+    Save an image.
+    :param image: image to be saved
+    :param path: path to save the image to
+    :return: None
     """
-    if not os.path.exists(file_path):
-        log.error(f"File '{file_path}' not found.")
-        return
-
-    log.info(f"{YELLOW}{ITALICS}Opening file '{file_path}'...{RESET}")
-
+    log.info(f"{YELLOW}{ITALICS}Saving image to '{image_path}'...{RESET}")
     try:
-        with open(file_path, "r") as data_file:
-            data = data_file.read()
-    except OSError:
-        log.exception(f"Unable to parse data file '{file_path}'.")
+        image.save(image_path, "PNG")
+    except IOError:
+        log.exception(f"Unable to save image to '{image_path}'.")
         return
 
-    log.debug(f"Data read from '{file_path}': {data}")
-    return data
+    log.debug(f"Image saved to '{image_path}' successfully.")
 
 
 def save_file(data: str, file_path: str) -> None:
@@ -98,27 +94,26 @@ def save_file(data: str, file_path: str) -> None:
     """
     log.debug(f"Writing output data to '{file_path}'...")
     try:
-        with open(file_path, "w") as output_file:
-            output_file.write(data)
+    
+        with open(file_path, "wb") as output_file:
+            b = bytearray()
+            w = [int(data[i:i+8],2) for i in range(0, len(data), 8)]
+            output_file.write(bytes(w))
+
     except OSError:
         log.error(f"Unable to write data to '{file_path}'")
 
 
-def save_image(image: Image, path: str) -> None:
-    """
-    Save an image.
-    :param image: image to be saved
-    :param path: path to save the image to
-    :return: None
-    """
-    log.info(f"{YELLOW}{ITALICS}Saving image to '{path}'...{RESET}")
-    try:
-        image.save(path, "PNG")
-    except IOError:
-        log.exception(f"Unable to save image to '{path}'.")
-        return
+def compress_data(data: str) -> bool:
+    comp = zlib.compress(data.encode())
+    h = binascii.hexlify(comp)
+    hex_binary = bin(int(h, 16))[2:]
+    return hex_binary
 
-    log.debug(f"Image saved to '{path}' successfully.")
+
+def decompress_data(data: str) -> str:
+    h = binascii.unhexlify(data.encode())    
+    return zlib.decompress(h.encode())
 
 
 def get_target_reds(image: Image) -> list:
@@ -127,7 +122,7 @@ def get_target_reds(image: Image) -> list:
     :param image: An image to analyze for common pixel values.
     :return: list of n most common pixels 
     """
-    log.debug("Extracting reds from source image...")
+    log.debug("Determining target reds from source image...")
     colors = Image.Image.getcolors(image, maxcolors=image.size[0] * image.size[1])
 
     # getcolors will return a tuple where the first value is the count of the
@@ -160,27 +155,22 @@ def get_target_reds(image: Image) -> list:
     return reds, total_pixel_ct
 
 
-def str_to_bin(data: str) -> str:
-    """
-    Convert a UTF8 string to binary.
-    :param data: string to convert
-    :return: binary string (e.g. "10010001100101110110011011001101111")
-    """
-    log.debug(f"Attempting to convert data to binary...")
-    try:
-        encoded_data = data.encode("utf-8", "surrogatepass")
-    except UnicodeEncodeError:
-        log.exception(f"Unable to encode '{data}'.")
-        return
+def get_bitstream(datastream, is_file=False):
+    bitstream = ""
 
-    try:
-        bits = bin(int.from_bytes(encoded_data, "big"))[2:]
-        binary = bits.zfill(8 * ((len(bits) + 7) // 8))
-    except:
-        log.exception(f"Unable to convert '{encoded_data}' to binary.")
-        return
+    if is_file:
+        if os.path.isfile(datastream): 
+            with open(datastream, 'rb') as f:
+                for byte in iter(lambda: f.read(1), b''):
+                    bitstream += ('{0:08b}'.format(ord(byte)))
 
-    return binary
+        else:
+            log.error(f"'{datastream}' does not exist.")
+    
+    else:
+        bitstream = ''.join(format(ord(x), 'b') for x in datastream)
+    
+    return bitstream
 
 
 def bin_to_str(bits: str) -> str:
@@ -234,7 +224,9 @@ def hash_str(data: str) -> str:
     return str(binary_of_hash)
 
 
-def encode_message(image: Image, data: str, target_reds: list, total_pixel_ct) -> Image:
+def encode_message(
+    image: Image, data: str, target_reds: list, total_pixel_ct: int
+) -> Image:
     """
     Encode a message into an image.
     :param image: image to be encoded into
@@ -250,7 +242,7 @@ def encode_message(image: Image, data: str, target_reds: list, total_pixel_ct) -
     # calculate the hash of the total data length
     hash_of_length = hash_str(str(len(data)))
     log.debug(f"Total data length: {len(data)}")
-    
+
     # create new image & pixel map
     new_image = image.copy()
 
@@ -304,7 +296,7 @@ def encode_message(image: Image, data: str, target_reds: list, total_pixel_ct) -
         return
 
 
-def decode_message(image: Image, target_reds: list, total_pixel_ct) -> str:
+def decode_message(image: Image, target_reds: list, total_pixel_ct: int) -> str:
     """
     Extract a message from an encoded image.
     :param image: image to have message extracted from
@@ -340,7 +332,7 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct) -> str:
                 break
 
         if len(size_hash) == 128:
-            break            
+            break
 
     log.debug(f"Extracted hash: {size_hash} (length: {len(size_hash)} bits)")
 
@@ -393,11 +385,16 @@ if __name__ == "__main__":
     group.add_argument("-d", "--decode", action="store_true", help="Decode an image.")
 
     parser.add_argument("-s", "--source", type=str, required=True, help="Source image.")
-    parser.add_argument(
-        "-o", "--out", type=str, default=None, help="Destination file."
-    )
+    parser.add_argument("-o", "--out", type=str, default=None, help="Destination file.")
     parser.add_argument("-f", "--file", type=str, help="Filepath of data to hide.")
     parser.add_argument("--data", type=str, help="String to hide.")
+    parser.add_argument(
+        "-c",
+        "--compress",
+        action="store_true",
+        default=False,
+        help="Compress input data before encoding.",
+    )
     parser.add_argument(
         "-v",
         "--verbose",
@@ -431,19 +428,19 @@ if __name__ == "__main__":
 
         # if we are encoding, we can either use an input file or a raw string
         if args.file:
-            data = open_file(args.file)
+            binary_data = get_bitstream(args.file, is_file=True)
 
         elif args.data:
-            data = args.data
+            binary_data = get_bitstream(args.data)
 
         else:
             log.error("You must provide a string or file to encode. Exiting...")
             exit(1)
 
-        # convert the raw message data to binary
-        binary_data = str_to_bin(data)
-                    
-        # we can only encode as many bits as there are pixels, so ensure we 
+        if args.compress:
+            compress_data(binary_data)
+
+        # we can only encode as many bits as there are pixels, so ensure we
         # can pull this shindig off with what we have
         if len(binary_data) > total_pixel_ct:
             log.error(f"Not enough pixels to encode inputted data into {args.source}. ")
@@ -455,11 +452,10 @@ if __name__ == "__main__":
 
         # encode the message in the image
         new_image = encode_message(image, binary_data, target_reds, total_pixel_ct)
- 
+
         # if we were able to actually encode everything, then save the image
         if new_image:
             save_image(new_image, args.out or f"new.{args.source}")
-
 
     elif args.decode:
         # extract the raw binary from the image
@@ -467,12 +463,13 @@ if __name__ == "__main__":
 
         # convert the extracted binary to a UTF8 decoded string, if we pulled it
         if decoded_binary:
-            decoded_message = bin_to_str(decoded_binary)
 
             if args.out:
-                save_file(decoded_message, args.out)
+                save_file(decoded_binary, args.out)
+            else:
+                decoded_message = bin_to_str(decoded_binary)
 
-            log.info(f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET} {decoded_message}")
+                log.info(f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET} {decoded_message}")
 
     print(f"{GREEN}\n\n{ICON}{RESET}")
     log.info(f"{GREEN}All steps completed.{RESET}")
