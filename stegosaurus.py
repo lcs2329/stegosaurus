@@ -25,11 +25,9 @@ import hashlib
 import logging
 import mimetypes
 import os
-import sys
 import zlib
 from collections import Counter
 from datetime import datetime
-from math import floor, log2
 
 import coloredlogs
 import magic
@@ -37,7 +35,6 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-sys.tracebacklimit = None
 log = logging.getLogger(__name__)
 coloredlogs.install(level="INFO", fmt="%(message)s", logger=log)
 
@@ -168,14 +165,27 @@ def get_target_reds(image: Image) -> list:
     return reds, total_pixel_ct
 
 
-def get_bitstream(datastream, is_file=False):
+def get_bitstream(datastream: str, is_file: bool = False):
+    """
+    Convert a datastream (either a file, or raw text) into a binary string
+    of bits.
+    :param datastream: data source, either a filepath or raw text
+    :param is_file: specification of whether datastream represents a file
+        or raw text
+    :return: raw string of binary data (ex. 1010110101001010)
+    """
     bitstream = ""
 
     if is_file:
         if os.path.isfile(datastream):
             with open(datastream, "rb") as f:
-                for byte in iter(lambda: f.read(1), b""):
-                    bitstream += "{0:08b}".format(ord(byte))
+                try:
+                    for byte in iter(lambda: f.read(1), b""):
+                        bitstream += "{0:08b}".format(ord(byte))
+
+                except:
+                    log.error("Unable to decode datastream to binary.")
+                    return
 
         else:
             log.error(f"'{datastream}' does not exist.")
@@ -254,19 +264,18 @@ def encode_message(
     :return: new image with data encoded inside
     """
     log.info(f"{YELLOW}{ITALICS}Encoding data...{RESET}")
+    log.debug(f"Target reds are {target_reds}...")
 
     # calculate the hash of the total data length
     hash_of_length = hash_str(str(len(data)))
     log.debug(
-        f"Total data length: {len(data)}, hash: {hash_of_length} ({len(hash_of_length)} bits)"
+        f"Total data length: {len(data)} bits, hash: {hash_of_length} ({len(hash_of_length)} bits)"
     )
 
     # create new image & pixel map
     new_image = image.copy()
 
     width, height = image.size
-    log.debug(f"Target reds are {target_reds}...")
-
     data_index = 0
     hash_index = 0
 
@@ -325,9 +334,9 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct: int) -> str:
     :return: binary data extracted from the image
     """
     log.info(f"{YELLOW}{ITALICS}Decoding data...{RESET}")
+    log.debug(f"Target reds are {target_reds}...")
 
     width, height = image.size
-    log.debug(f"Target reds are {target_reds}...")
 
     # first, extract the hash. the hash will be encoded into the LSB
     # of the green channels for each pixel in the reds, in order of dominance
