@@ -11,10 +11,12 @@ todo:
     - compression
     - use the green channel past 128 bits
     - encode hash of data following size hash
-    - split code up into different files (?)
+    - split code up into different files
     - absolute vs relative image path
     - setup pyinstaller compilation for static binary
     - guess filetype of extracted file
+    - optional encoded header with instructional message (?)
+    - unit tests
 """
 
 import argparse
@@ -70,9 +72,11 @@ def open_image(image_path: str) -> Image:
     log.info(f"{YELLOW}{ITALICS}Opening image '{image_path}'...{RESET}")
     try:
         image = Image.open(image_path, "r")
+
     except IOError:
         log.exception(f"Unable to open image at path '{image_path}'.")
         return
+
     log.debug(f"Image '{image_path}' opened successfully.")
 
     return image
@@ -88,6 +92,7 @@ def save_image(image: Image, image_path: str) -> None:
     log.info(f"{YELLOW}{ITALICS}Saving image to '{image_path}'...{RESET}")
     try:
         image.save(image_path, "PNG")
+
     except IOError:
         log.exception(f"Unable to save image to '{image_path}'.")
         return
@@ -105,9 +110,9 @@ def save_file(data: str, file_path: str) -> None:
     log.debug(f"Writing output data to '{file_path}'...")
     try:
         with open(file_path, "wb") as output_file:
-            w = [int(data[i:i+8],2) for i in range(0, len(data), 8)]
+            w = [int(data[i : i + 8], 2) for i in range(0, len(data), 8)]
             output_file.write(bytes(w))
-    
+
     except OSError:
         log.error(f"Unable to write data to '{file_path}'")
 
@@ -120,7 +125,7 @@ def compress_data(data: str) -> bool:
 
 
 def decompress_data(data: str) -> str:
-    h = binascii.unhexlify(data.encode())    
+    h = binascii.unhexlify(data.encode())
     return zlib.decompress(h.encode())
 
 
@@ -167,17 +172,17 @@ def get_bitstream(datastream, is_file=False):
     bitstream = ""
 
     if is_file:
-        if os.path.isfile(datastream): 
-            with open(datastream, 'rb') as f:
-                for byte in iter(lambda: f.read(1), b''):
-                    bitstream += ('{0:08b}'.format(ord(byte)))
+        if os.path.isfile(datastream):
+            with open(datastream, "rb") as f:
+                for byte in iter(lambda: f.read(1), b""):
+                    bitstream += "{0:08b}".format(ord(byte))
 
         else:
             log.error(f"'{datastream}' does not exist.")
-    
+
     else:
-        bitstream = ''.join(format(ord(x), 'b') for x in datastream)
-    
+        bitstream = "".join(format(ord(x), "b") for x in datastream)
+
     return bitstream
 
 
@@ -194,7 +199,8 @@ def bin_to_str(bits: str) -> str:
             n.to_bytes((n.bit_length() + 7) // 8, "big").decode("utf8", "surrogatepass")
             or "\0"
         )
-    except UnicodeDecodeError as e:
+
+    except UnicodeDecodeError:
         log.error(f"Unable to convert data to a UTF8 string.")
         return
 
@@ -211,6 +217,7 @@ def hash_str(data: str) -> str:
     # encode our data into a byte representation
     try:
         encoded_data = data.encode()
+
     except UnicodeEncodeError:
         log.exception(f"Unable to encode '{data}'.")
         return
@@ -218,6 +225,7 @@ def hash_str(data: str) -> str:
     # get the MD5 hash of our data, which will be in hex
     try:
         hex_hash = hashlib.md5(encoded_data).hexdigest()
+
     except:
         log.exception(f"Unable to calculate the hash of '{data}'.")
         return
@@ -249,7 +257,9 @@ def encode_message(
 
     # calculate the hash of the total data length
     hash_of_length = hash_str(str(len(data)))
-    log.debug(f"Total data length: {len(data)}, hash: {hash_of_length} ({len(hash_of_length)} bits)")
+    log.debug(
+        f"Total data length: {len(data)}, hash: {hash_of_length} ({len(hash_of_length)} bits)"
+    )
 
     # create new image & pixel map
     new_image = image.copy()
@@ -318,7 +328,6 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct: int) -> str:
 
     width, height = image.size
     log.debug(f"Target reds are {target_reds}...")
-
 
     # first, extract the hash. the hash will be encoded into the LSB
     # of the green channels for each pixel in the reds, in order of dominance
@@ -393,11 +402,6 @@ if __name__ == "__main__":
 
     group.add_argument("-e", "--encode", action="store_true", help="Encode a string.")
     group.add_argument("-d", "--decode", action="store_true", help="Decode an image.")
-
-    parser.add_argument("-s", "--source", type=str, required=True, help="Source image.")
-    parser.add_argument("-o", "--out", type=str, default=None, help="Destination file.")
-    parser.add_argument("-f", "--file", type=str, help="Filepath of data to hide.")
-    parser.add_argument("--data", type=str, help="String to hide.")
     parser.add_argument(
         "-c",
         "--compress",
@@ -411,6 +415,29 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="Enable verbose logging.",
+    )
+
+    parser.add_argument(
+        "-s",
+        "--source",
+        type=str,
+        metavar="SOURCE IMAGE",
+        required=True,
+        help="Source image.",
+    )
+    parser.add_argument(
+        "-o",
+        "--out",
+        type=str,
+        metavar="OUTPUT FILE",
+        default=None,
+        help="Destination file.",
+    )
+    parser.add_argument(
+        "-f", "--file", type=str, metavar="INPUT FILE", help="Filepath of data to hide."
+    )
+    parser.add_argument(
+        "--input", type=str, metavar="INPUT STRING", help="String to hide."
     )
 
     args = parser.parse_args()
@@ -455,7 +482,9 @@ if __name__ == "__main__":
         # we can only encode as many bits as there are pixels, so ensure we
         # can pull this shindig off with what we have
         if len(binary_data) > total_pixel_ct:
-            log.error(f"Not enough pixels to encode inputted data into '{args.source}'. ")
+            log.error(
+                f"Not enough pixels to encode inputted data into '{args.source}'. "
+            )
             log.error(
                 f"Total data length is {len(binary_data)} bits, but only "
                 f"{total_pixel_ct} encodable bits are available. Try a larger image."
@@ -470,6 +499,7 @@ if __name__ == "__main__":
             save_image(new_image, args.out or f"encoded.{args.source}")
 
     elif args.decode:
+
         # extract the raw binary from the image
         decoded_binary = decode_message(image, target_reds, total_pixel_ct)
 
@@ -483,16 +513,18 @@ if __name__ == "__main__":
             # UTF8 encoded data, we can print it no problem.
             else:
                 decoded_message = bin_to_str(decoded_binary)
-                
-                if decoded_message:
-                    log.info(f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET}\n\n {decoded_message}")
 
-                # if we got here, then we don't have a standard UTF8 encoded 
+                if decoded_message:
+                    log.info(
+                        f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET}\n\n {decoded_message}"
+                    )
+
+                # if we got here, then we don't have a standard UTF8 encoded
                 # message (such as a zip file, for example). write it to a new
                 # file with the proper extension (if we can guess it).
                 else:
                     log.info(
-                        "Message was unable to be UTF8 decoded, falling "\
+                        "Message was unable to be UTF8 decoded, falling "
                         "back to a standard disk write..."
                     )
 
@@ -504,7 +536,9 @@ if __name__ == "__main__":
                     mime = magic.Magic(mime=True)
                     mimetype = mime.from_file(out_file)
                     log.debug(f"Mimetype: {mimetype}")
-                    log.info(f"Wrote file to {out_file}, filetype is guessed to be {mimetypes.guess_extension(mimetype)}")
+                    log.info(
+                        f"Wrote file to {out_file}, filetype is guessed to be {mimetypes.guess_extension(mimetype)}"
+                    )
 
     print(f"{GREEN}\n\n{ICON}{RESET}")
     log.debug(f"Total elapsed time: {datetime.now() - start_time}")
