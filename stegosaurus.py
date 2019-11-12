@@ -7,26 +7,35 @@ Encode hidden messages into image files.
 
 """
 todo:
-    - video
-    - zip
+    - encode into video frames
+    - compression
     - use the green channel past 128 bits
+    - encode hash of data following size hash
+    - split code up into different files (?)
+    - absolute vs relative image path
+    - setup pyinstaller compilation for static binary
+    - guess filetype of extracted file
 """
 
 import argparse
 import binascii
 import hashlib
 import logging
+import mimetypes
 import os
+import sys
 import zlib
 from collections import Counter
 from datetime import datetime
 from math import floor, log2
 
 import coloredlogs
+import magic
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
+sys.tracebacklimit = None
 log = logging.getLogger(__name__)
 coloredlogs.install(level="INFO", fmt="%(message)s", logger=log)
 
@@ -95,12 +104,10 @@ def save_file(data: str, file_path: str) -> None:
     """
     log.debug(f"Writing output data to '{file_path}'...")
     try:
-    
         with open(file_path, "wb") as output_file:
-            b = bytearray()
             w = [int(data[i:i+8],2) for i in range(0, len(data), 8)]
             output_file.write(bytes(w))
-
+    
     except OSError:
         log.error(f"Unable to write data to '{file_path}'")
 
@@ -187,8 +194,8 @@ def bin_to_str(bits: str) -> str:
             n.to_bytes((n.bit_length() + 7) // 8, "big").decode("utf8", "surrogatepass")
             or "\0"
         )
-    except:
-        log.exception(f"Unable to convert {bits}.")
+    except UnicodeDecodeError as e:
+        log.error(f"Unable to convert data to a UTF8 string.")
         return
 
     log.debug(f"{bits} = {data}")
@@ -242,7 +249,7 @@ def encode_message(
 
     # calculate the hash of the total data length
     hash_of_length = hash_str(str(len(data)))
-    log.debug(f"Total data length: {len(data)}")
+    log.debug(f"Total data length: {len(data)}, hash: {hash_of_length} ({len(hash_of_length)} bits)")
 
     # create new image & pixel map
     new_image = image.copy()
@@ -310,6 +317,8 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct: int) -> str:
     log.info(f"{YELLOW}{ITALICS}Decoding data...{RESET}")
 
     width, height = image.size
+    log.debug(f"Target reds are {target_reds}...")
+
 
     # first, extract the hash. the hash will be encoded into the LSB
     # of the green channels for each pixel in the reds, in order of dominance
@@ -446,7 +455,7 @@ if __name__ == "__main__":
         # we can only encode as many bits as there are pixels, so ensure we
         # can pull this shindig off with what we have
         if len(binary_data) > total_pixel_ct:
-            log.error(f"Not enough pixels to encode inputted data into {args.source}. ")
+            log.error(f"Not enough pixels to encode inputted data into '{args.source}'. ")
             log.error(
                 f"Total data length is {len(binary_data)} bits, but only "
                 f"{total_pixel_ct} encodable bits are available. Try a larger image."
@@ -458,21 +467,44 @@ if __name__ == "__main__":
 
         # if we were able to actually encode everything, then save the image
         if new_image:
-            save_image(new_image, args.out or f"new.{args.source}")
+            save_image(new_image, args.out or f"encoded.{args.source}")
 
     elif args.decode:
         # extract the raw binary from the image
         decoded_binary = decode_message(image, target_reds, total_pixel_ct)
 
-        # convert the extracted binary to a UTF8 decoded string, if we pulled it
         if decoded_binary:
 
+            # if we specified an out file, then just save it
             if args.out:
                 save_file(decoded_binary, args.out)
+
+            # otherwise, attempt to print it to stdout. if it is standard
+            # UTF8 encoded data, we can print it no problem.
             else:
                 decoded_message = bin_to_str(decoded_binary)
+                
+                if decoded_message:
+                    log.info(f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET}\n\n {decoded_message}")
 
-                log.info(f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET} {decoded_message}")
+                # if we got here, then we don't have a standard UTF8 encoded 
+                # message (such as a zip file, for example). write it to a new
+                # file with the proper extension (if we can guess it).
+                else:
+                    log.info(
+                        "Message was unable to be UTF8 decoded, falling "\
+                        "back to a standard disk write..."
+                    )
+
+                    # save the file to disk
+                    out_file = f"encoded.{args.source}"
+                    save_file(decoded_binary, out_file)
+
+                    # attempt to guess the filetype
+                    mime = magic.Magic(mime=True)
+                    mimetype = mime.from_file(out_file)
+                    log.debug(f"Mimetype: {mimetype}")
+                    log.info(f"Wrote file to {out_file}, filetype is guessed to be {mimetypes.guess_extension(mimetype)}")
 
     print(f"{GREEN}\n\n{ICON}{RESET}")
     log.debug(f"Total elapsed time: {datetime.now() - start_time}")
