@@ -8,9 +8,9 @@ Encode hidden messages into image files.
 """
 todo:
     - encode into video frames
+    --- encryption option
     - compression
     - use the green channel past 128 bits
-    - encode hash of data following size hash
     - split code up into different files
     - absolute vs relative image path
     - setup pyinstaller compilation for static binary
@@ -214,7 +214,6 @@ def bin_to_str(bits: str) -> str:
         log.error(f"Unable to convert data to a UTF8 string.")
         return
 
-    log.debug(f"{bits} = {data}")
     return data
 
 
@@ -272,16 +271,23 @@ def encode_message(
         f"Total data length: {len(data)} bits, hash: {hash_of_length} ({len(hash_of_length)} bits)"
     )
 
+    # calculate the hash of the data
+    hash_of_data = hash_str(data)
+    log.debug(f"Data hash: {hash_of_data} ({len(hash_of_data)} bits)")
+
+    # encode the total size hash as well as the data hash into the first
+    # 256 bits of the green channel
+    header = hash_of_length + hash_of_data
+
     # create new image & pixel map
     new_image = image.copy()
 
     width, height = image.size
     data_index = 0
-    hash_index = 0
+    header_index = 0
 
     # show a progress bar equivalent to all of the data we need to write
-    # (128 bits for the hash + number of bits in our data)
-    with tqdm(total=len(data) + 128, leave=False) as pbar:
+    with tqdm(total=len(data) + len(header), leave=False) as pbar:
 
         for x in range(width):
             for y in range(height):
@@ -302,23 +308,23 @@ def encode_message(
                         data_index += 1
                         pbar.update(1)
 
-                    # if we still have some of our hash to encode, then encode
-                    # the current hash bit into the LSB of the green channel
-                    if hash_index < len(hash_of_length):
-                        pixel[1] = pixel[1] & ~1 | int(hash_of_length[hash_index])
-                        hash_index += 1
+                    # if we still have some of our header to encode, then encode
+                    # the current header bit into the LSB of the green channel
+                    if header_index < len(header):
+                        pixel[1] = pixel[1] & ~1 | int(header[header_index])
+                        header_index += 1
                         pbar.update(1)
 
                     # set pixel in new image
                     new_image.putpixel((x, y), tuple(pixel))
 
-                    # if we have written our hash and our data, then we are done
-                    if data_index == len(data) and hash_index == len(hash_of_length):
+                    # if we have written our header and our data, then we are done
+                    if data_index == len(data) and header_index == len(header):
                         return new_image
 
     # if we still have data to write, then we didn't have enough pixels
     # in the image to encode our data
-    if data_index < len(data):
+    if data_index < len(data) or header_index < len(header):
         log.error("Not enough bits to encode data within the image.")
         return
 
@@ -338,14 +344,13 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct: int) -> str:
 
     width, height = image.size
 
-    # first, extract the hash. the hash will be encoded into the LSB
+    # first, extract the header. the header will be encoded into the LSB
     # of the green channels for each pixel in the reds, in order of dominance
-    size_hash = ""
+    header = ""
     for x in range(0, width):
         for y in range(0, height):
 
-            # an MD5 hash is 128 bits, so keep going until we get all 128
-            if len(size_hash) < 128:
+            if len(header) < 256:
 
                 # extract the pixel tuple (R, G, B)
                 pixel = list(image.getpixel((x, y)))
@@ -353,16 +358,20 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct: int) -> str:
                 # if the R is in our target reds, extract the LSB
                 if pixel[0] in target_reds:
                     extracted_bit = pixel[1] & 1
-                    size_hash += str(extracted_bit)
+                    header += str(extracted_bit)
 
-            # we have our full hash, so we can break
+            # we have our full header, so we can break
             else:
                 break
 
-        if len(size_hash) == 128:
+        if len(header) == 256:
             break
 
-    log.debug(f"Extracted hash: {size_hash} (length: {len(size_hash)} bits)")
+    size_hash = header[:128]
+    data_hash = header[128:]
+
+    log.debug(f"Extracted size: {size_hash} (length: {len(size_hash)} bits)")
+    log.debug(f"Extracted data hash: {data_hash} (length: {len(data_hash)} bits)")
 
     # iterate a counter, calculating the hash of the counter until the hash
     # of the counter matches the hash of the data length. once it matches,
@@ -388,7 +397,19 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct: int) -> str:
                 # if the length of our extracted binary matches,
                 # then we're done
                 if len(extracted_bin) >= total_data_length:
-                    return extracted_bin
+
+                    # ensure that the final extracted data matches the hash
+                    # we extracted from the header
+                    hash_of_extracted_binary = hash_str(extracted_bin)
+                    log.debug("Performing data validation checks...")
+
+                    if hash_of_extracted_binary == data_hash:
+                        log.debug("Data passed all verification checks.")
+                        return extracted_bin
+
+                    else:
+                        log.error("Extracted data failed verification checks.")
+                        return None
 
                 # extract the pixel tuple (R, G, B)
                 pixel = list(image.getpixel((x, y)))
@@ -411,6 +432,9 @@ if __name__ == "__main__":
 
     group.add_argument("-e", "--encode", action="store_true", help="Encode a string.")
     group.add_argument("-d", "--decode", action="store_true", help="Decode an image.")
+    parser.add_argument(
+        "--encrypt", type=str, help="Encrypt the input data before encoding."
+    )
     parser.add_argument(
         "-c",
         "--compress",
@@ -505,7 +529,8 @@ if __name__ == "__main__":
 
         # if we were able to actually encode everything, then save the image
         if new_image:
-            save_image(new_image, args.out or f"encoded.{args.source}")
+            outfile = args.out or "encoded." + os.path.basename(args.source)
+            save_image(new_image, outfile)
 
     elif args.decode:
 
