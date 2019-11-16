@@ -115,6 +115,7 @@ def save_file(data: str, file_path: str) -> None:
 
 
 def compress_data(data: str) -> bool:
+    log.debug(f"Compressing input data")
     comp = zlib.compress(data.encode())
     h = binascii.hexlify(comp)
     hex_binary = bin(int(h, 16))[2:]
@@ -510,7 +511,7 @@ if __name__ == "__main__":
             exit(1)
 
         if args.compress:
-            compress_data(binary_data)
+            binary_data = compress_data(binary_data)
 
         # we can only encode as many bits as there are pixels, so ensure we
         # can pull this shindig off with what we have
