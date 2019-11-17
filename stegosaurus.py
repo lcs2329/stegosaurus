@@ -192,7 +192,7 @@ def get_bitstream(datastream: str, is_file: bool = False):
             log.error(f"'{datastream}' does not exist.")
 
     else:
-        bitstream = "".join(format(ord(x), "b") for x in datastream)
+        bitstream = "".join(format(ord(i),'b').zfill(8) for i in datastream)
 
     return bitstream
 
@@ -503,8 +503,8 @@ if __name__ == "__main__":
         if args.file:
             binary_data = get_bitstream(args.file, is_file=True)
 
-        elif args.data:
-            binary_data = get_bitstream(args.data)
+        elif args.input:
+            binary_data = get_bitstream(args.input)
 
         else:
             log.error("You must provide a string or file to encode. Exiting...")
