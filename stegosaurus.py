@@ -140,18 +140,22 @@ def compress_data(data:str) -> str:
     :param data: input data string
     :return: binary compressed data string
     """
+
+    # first, encode the data into bytes
     try:
         encoded_data = data.encode()
     except UnicodeEncodeError:
         log.exception(f"Unable to encode {data}.")
         return
 
+    # compress the encoded data into hex
     try:
         compressed = zlib.compress(encoded_data)
     except zlib.error as e:
         log.error(f"Error encountered compressing data. Error output: {e}")
         return
 
+    # convert the hex data into a binary string
     try:
         bits = bin(int.from_bytes(compressed, byteorder="big"))[2:]
     except ValueError as e:
@@ -167,6 +171,8 @@ def decompress_data(data:str) -> str:
     :param data: compressed binary data string
     :return: decoded data
     """
+
+    # first convert the binary data into a byte array
     v = int(data, 2)
     b = bytearray()
     while v:
@@ -174,12 +180,15 @@ def decompress_data(data:str) -> str:
         v >>= 8
 
     byte_array = bytes(b[::-1])
+
+    # now, decompress the byte array
     try:
         decompressed = zlib.decompress(byte_array)
     except zlib.error as e:
         log.error(f"Error encountered decompressing data. Error output: {e}")
         return
 
+    # convert the decompressed data from hex to a UTF decoded string
     try:
         decompressed_data = decompressed.decode()
     except ValueError as e:
