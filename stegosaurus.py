@@ -97,6 +97,26 @@ def save_image(image: Image, image_path: str) -> None:
     log.debug(f"Image saved to '{image_path}' successfully.")
 
 
+def open_file(file_path:str) ->str:
+    """
+    Open a file at a given filepath.
+    :param file_path: path to file
+    :return: data read from input file as a string
+    """
+    if os.path.isfile(file_path):
+            log.debug(f"Opening file at path {file_path}...")
+            try:
+                with open(file_path, "r") as f:
+                    return f.read()
+
+            except OSError as e:
+                log.error(f"Error encountered opening '{file_path}'. Error output: {e}")
+
+    else:
+        log.error(f"'{file_path}' does not exist.")
+        return
+
+
 def save_file(data: str, file_path: str) -> None:
     """
     Save decoded data to a file.
@@ -106,25 +126,67 @@ def save_file(data: str, file_path: str) -> None:
     """
     log.debug(f"Writing output data to '{file_path}'...")
     try:
-        with open(file_path, "wb") as output_file:
-            w = [int(data[i : i + 8], 2) for i in range(0, len(data), 8)]
-            output_file.write(bytes(w))
+        with open(file_path, "w") as output_file:
+            output_file.write(data)
+
 
     except OSError:
         log.error(f"Unable to write data to '{file_path}'")
 
 
-def compress_data(data: str) -> bool:
-    log.debug(f"Compressing input data")
-    comp = zlib.compress(data.encode())
-    h = binascii.hexlify(comp)
-    hex_binary = bin(int(h, 16))[2:]
-    return hex_binary
+def compress_data(data:str) -> str:
+    """
+    Compress a given data input, returning a binary representation.
+    :param data: input data string
+    :return: binary compressed data string
+    """
+    try:
+        encoded_data = data.encode()
+    except UnicodeEncodeError:
+        log.exception(f"Unable to encode {data}.")
+        return
+
+    try:
+        compressed = zlib.compress(encoded_data)
+    except zlib.error as e:
+        log.error(f"Error encountered compressing data. Error output: {e}")
+        return
+
+    try:
+        bits = bin(int.from_bytes(compressed, byteorder="big"))[2:]
+    except ValueError as e:
+        log.error(f"ValueError hit converting bytes to binary. Error output: {e}")
+        return
+
+    return bits
 
 
-def decompress_data(data: str) -> str:
-    h = binascii.unhexlify(data.encode())
-    return zlib.decompress(h.encode())
+def decompress_data(data:str) -> str:
+    """
+    Compress a given data input, returning a decoded representation.
+    :param data: compressed binary data string
+    :return: decoded data
+    """
+    v = int(data, 2)
+    b = bytearray()
+    while v:
+        b.append(v & 0xFF)
+        v >>= 8
+
+    byte_array = bytes(b[::-1])
+    try:
+        decompressed = zlib.decompress(byte_array)
+    except zlib.error as e:
+        log.error(f"Error encountered decompressing data. Error output: {e}")
+        return
+
+    try:
+        decompressed_data = decompressed.decode()
+    except ValueError as e:
+        log.error(f"ValueError hit decoding decompresseed data. Error output: {e}")
+        return
+
+    return decompressed_data
 
 
 def get_target_reds(image: Image) -> list:
@@ -501,32 +563,32 @@ if __name__ == "__main__":
 
         # if we are encoding, we can either use an input file or a raw string
         if args.file:
-            binary_data = get_bitstream(args.file, is_file=True)
+            data = open_file(args.file)
 
         elif args.input:
-            binary_data = get_bitstream(args.input)
+            data = args.input
 
         else:
             log.error("You must provide a string or file to encode. Exiting...")
             exit(1)
 
-        if args.compress:
-            binary_data = compress_data(binary_data)
+        
+        compressed_data = compress_data(data)
 
         # we can only encode as many bits as there are pixels, so ensure we
         # can pull this shindig off with what we have
-        if len(binary_data) > total_pixel_ct:
+        if len(compressed_data) > total_pixel_ct:
             log.error(
                 f"Not enough pixels to encode inputted data into '{args.source}'. "
             )
             log.error(
-                f"Total data length is {len(binary_data)} bits, but only "
+                f"Total data length is {len(compressed_data)} bits, but only "
                 f"{total_pixel_ct} encodable bits are available. Try a larger image."
             )
             exit(1)
 
         # encode the message in the image
-        new_image = encode_message(image, binary_data, target_reds, total_pixel_ct)
+        new_image = encode_message(image, compressed_data, target_reds, total_pixel_ct)
 
         # if we were able to actually encode everything, then save the image
         if new_image:
@@ -536,44 +598,23 @@ if __name__ == "__main__":
     elif args.decode:
 
         # extract the raw binary from the image
-        decoded_binary = decode_message(image, target_reds, total_pixel_ct)
+        extracted_binary = decode_message(image, target_reds, total_pixel_ct)
 
-        if decoded_binary:
+        if extracted_binary:
 
-            # if we specified an out file, then just save it
-            if args.out:
-                save_file(decoded_binary, args.out)
+            decompressed_data = decompress_data(extracted_binary)
 
-            # otherwise, attempt to print it to stdout. if it is standard
-            # UTF8 encoded data, we can print it no problem.
-            else:
-                decoded_message = bin_to_str(decoded_binary)
+            if decompressed_data:
 
-                if decoded_message:
-                    log.info(
-                        f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET}\n\n {decoded_message}"
-                    )
+                # if we specified an out file, then just save it
+                if args.out:
+                    save_file(decompressed_data, args.out)
 
-                # if we got here, then we don't have a standard UTF8 encoded
-                # message (such as a zip file, for example). write it to a new
-                # file with the proper extension (if we can guess it).
                 else:
                     log.info(
-                        "Message was unable to be UTF8 decoded, falling "
-                        "back to a standard disk write..."
+                        f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET}\n\n {decompressed_data}"
                     )
 
-                    # save the file to disk
-                    out_file = f"encoded.{args.source}"
-                    save_file(decoded_binary, out_file)
-
-                    # attempt to guess the filetype
-                    mime = magic.Magic(mime=True)
-                    mimetype = mime.from_file(out_file)
-                    log.debug(f"Mimetype: {mimetype}")
-                    log.info(
-                        f"Wrote file to {out_file}, filetype is guessed to be {mimetypes.guess_extension(mimetype)}"
-                    )
 
     print(f"{GREEN}\n\n{ICON}{RESET}")
     log.debug(f"Total elapsed time: {datetime.now() - start_time}")
