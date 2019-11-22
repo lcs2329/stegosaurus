@@ -505,9 +505,6 @@ if __name__ == "__main__":
     group.add_argument("-e", "--encode", action="store_true", help="Encode a string.")
     group.add_argument("-d", "--decode", action="store_true", help="Decode an image.")
     parser.add_argument(
-        "--encrypt", type=str, help="Encrypt the input data before encoding."
-    )
-    parser.add_argument(
         "-c",
         "--compress",
         action="store_true",
