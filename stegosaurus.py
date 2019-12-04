@@ -7,10 +7,8 @@ Encode hidden messages into image files.
 
 
 import argparse
-import binascii
 import hashlib
 import logging
-import mimetypes
 import os
 import zlib
 from collections import Counter
