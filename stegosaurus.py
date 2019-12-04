@@ -5,19 +5,6 @@ stegosaurus.py
 Encode hidden messages into image files.
 """
 
-"""
-todo:
-    - encode into video frames
-    --- encryption option
-    - compression
-    - use the green channel past 128 bits
-    - split code up into different files
-    - absolute vs relative image path
-    - setup pyinstaller compilation for static binary
-    - guess filetype of extracted file
-    - optional encoded header with instructional message (?)
-    - unit tests
-"""
 
 import argparse
 import binascii
@@ -30,7 +17,6 @@ from collections import Counter
 from datetime import datetime
 
 import coloredlogs
-import magic
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
@@ -62,6 +48,7 @@ def open_image(image_path: str) -> Image:
     :param image_path: path to the image to be opened
     :return: Image object from path
     """
+
     if not os.path.exists(image_path):
         log.error(f"Image '{args.source}' not found.")
         return
@@ -86,6 +73,7 @@ def save_image(image: Image, image_path: str) -> None:
     :param path: path to save the image to
     :return: None
     """
+
     log.info(f"{YELLOW}{ITALICS}Saving image to '{image_path}'...{RESET}")
     try:
         image.save(image_path, "PNG")
@@ -97,20 +85,21 @@ def save_image(image: Image, image_path: str) -> None:
     log.debug(f"Image saved to '{image_path}' successfully.")
 
 
-def open_file(file_path:str) ->str:
+def open_file(file_path: str) -> str:
     """
     Open a file at a given filepath.
     :param file_path: path to file
     :return: data read from input file as a string
     """
-    if os.path.isfile(file_path):
-            log.debug(f"Opening file at path {file_path}...")
-            try:
-                with open(file_path, "r") as f:
-                    return f.read()
 
-            except OSError as e:
-                log.error(f"Error encountered opening '{file_path}'. Error output: {e}")
+    if os.path.isfile(file_path):
+        log.debug(f"Opening file at path {file_path}...")
+        try:
+            with open(file_path, "r") as f:
+                return f.read()
+
+        except OSError as e:
+            log.error(f"Error encountered opening '{file_path}'. Error output: {e}")
 
     else:
         log.error(f"'{file_path}' does not exist.")
@@ -124,17 +113,17 @@ def save_file(data: str, file_path: str) -> None:
     :param file_path: name of the file to be created
     :return: None
     """
+
     log.debug(f"Writing output data to '{file_path}'...")
     try:
         with open(file_path, "w") as output_file:
             output_file.write(data)
 
-
     except OSError:
         log.error(f"Unable to write data to '{file_path}'")
 
 
-def compress_data(data:str) -> str:
+def compress_data(data: str) -> str:
     """
     Compress a given data input, returning a binary representation.
     :param data: input data string
@@ -165,7 +154,7 @@ def compress_data(data:str) -> str:
     return bits
 
 
-def decompress_data(data:str) -> str:
+def decompress_data(data: str) -> str:
     """
     Compress a given data input, returning a decoded representation.
     :param data: compressed binary data string
@@ -204,6 +193,7 @@ def get_target_reds(image: Image) -> list:
     :param image: An image to analyze for common pixel values.
     :return: list of n most common pixels 
     """
+
     log.debug("Determining target reds from source image...")
     colors = Image.Image.getcolors(image, maxcolors=image.size[0] * image.size[1])
 
@@ -237,64 +227,13 @@ def get_target_reds(image: Image) -> list:
     return reds, total_pixel_ct
 
 
-def get_bitstream(datastream: str, is_file: bool = False):
-    """
-    Convert a datastream (either a file, or raw text) into a binary string
-    of bits.
-    :param datastream: data source, either a filepath or raw text
-    :param is_file: specification of whether datastream represents a file
-        or raw text
-    :return: raw string of binary data (ex. 1010110101001010)
-    """
-    bitstream = ""
-
-    if is_file:
-        if os.path.isfile(datastream):
-            with open(datastream, "rb") as f:
-                try:
-                    for byte in iter(lambda: f.read(1), b""):
-                        bitstream += "{0:08b}".format(ord(byte))
-
-                except:
-                    log.error("Unable to decode datastream to binary.")
-                    return
-
-        else:
-            log.error(f"'{datastream}' does not exist.")
-
-    else:
-        bitstream = "".join(format(ord(i),'b').zfill(8) for i in datastream)
-
-    return bitstream
-
-
-def bin_to_str(bits: str) -> str:
-    """
-    Convert a binary string to a UTF8 string.
-    :param bits: binary string to convert
-    :return: UTF8 encoded string (e.g. "hello")
-    """
-    log.debug(f"Attempting to convert extracted binary to UTF8...")
-    n = int(bits, 2)
-    try:
-        data = (
-            n.to_bytes((n.bit_length() + 7) // 8, "big").decode("utf8", "surrogatepass")
-            or "\0"
-        )
-
-    except UnicodeDecodeError:
-        log.error(f"Unable to convert data to a UTF8 string.")
-        return
-
-    return data
-
-
 def hash_str(data: str) -> str:
     """
     Generate a binary representation of an MD5 hash of a string.
     :param data: data to be hashed
     :return: binary MD5 hash
     """
+
     # encode our data into a byte representation
     try:
         encoded_data = data.encode()
@@ -334,6 +273,7 @@ def encode_message(
         for data encoding
     :return: new image with data encoded inside
     """
+
     log.info(f"{YELLOW}{ITALICS}Encoding data...{RESET}")
     log.debug(f"Target reds are {target_reds}...")
 
@@ -411,6 +351,7 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct: int) -> str:
         for data encoding
     :return: binary data extracted from the image
     """
+
     log.info(f"{YELLOW}{ITALICS}Decoding data...{RESET}")
     log.debug(f"Target reds are {target_reds}...")
 
@@ -504,13 +445,7 @@ if __name__ == "__main__":
 
     group.add_argument("-e", "--encode", action="store_true", help="Encode a string.")
     group.add_argument("-d", "--decode", action="store_true", help="Decode an image.")
-    parser.add_argument(
-        "-c",
-        "--compress",
-        action="store_true",
-        default=False,
-        help="Compress input data before encoding.",
-    )
+
     parser.add_argument(
         "-v",
         "--verbose",
@@ -518,7 +453,6 @@ if __name__ == "__main__":
         default=False,
         help="Enable verbose logging.",
     )
-
     parser.add_argument(
         "-s",
         "--source",
@@ -578,7 +512,6 @@ if __name__ == "__main__":
             log.error("You must provide a string or file to encode. Exiting...")
             exit(1)
 
-        
         compressed_data = compress_data(data)
 
         # we can only encode as many bits as there are pixels, so ensure we
@@ -620,7 +553,6 @@ if __name__ == "__main__":
                     log.info(
                         f"{BOLD}{LIGHT_GRAY}Decoded message:{RESET}\n\n {decompressed_data}"
                     )
-
 
     print(f"{GREEN}\n\n{ICON}{RESET}")
     log.debug(f"Total elapsed time: {datetime.now() - start_time}")
