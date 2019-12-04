@@ -227,9 +227,9 @@ def get_target_reds(image: Image) -> list:
 
 def hash_str(data: str) -> str:
     """
-    Generate a binary representation of an MD5 hash of a string.
+    Generate a binary representation of a sha256 hash of a string.
     :param data: data to be hashed
-    :return: binary MD5 hash
+    :return: binary sha256 hash
     """
 
     # encode our data into a byte representation
@@ -240,9 +240,9 @@ def hash_str(data: str) -> str:
         log.exception(f"Unable to encode '{data}'.")
         return
 
-    # get the MD5 hash of our data, which will be in hex
+    # get the sha256 hash of our data, which will be in hex
     try:
-        hex_hash = hashlib.md5(encoded_data).hexdigest()
+        hex_hash = hashlib.sha256(encoded_data).hexdigest()
 
     except:
         log.exception(f"Unable to calculate the hash of '{data}'.")
@@ -251,8 +251,8 @@ def hash_str(data: str) -> str:
     # convert our hex hash into binary
     binary_of_hash = bin(int(hex_hash, 16))[2:]
 
-    # pad the right with zeroes if we are not at 128 bits
-    while len(binary_of_hash) != 128:
+    # pad the right with zeroes if we are not at 256 bits
+    while len(binary_of_hash) != 256:
         binary_of_hash += "0"
 
     return str(binary_of_hash)
@@ -286,7 +286,7 @@ def encode_message(
     log.debug(f"Data hash: {hash_of_data} ({len(hash_of_data)} bits)")
 
     # encode the total size hash as well as the data hash into the first
-    # 256 bits of the green channel
+    # 512 bits of the green channel
     header = hash_of_length + hash_of_data
 
     # create new image & pixel map
@@ -361,7 +361,7 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct: int) -> str:
     for x in range(0, width):
         for y in range(0, height):
 
-            if len(header) < 256:
+            if len(header) < 512:
 
                 # extract the pixel tuple (R, G, B)
                 pixel = list(image.getpixel((x, y)))
@@ -375,11 +375,11 @@ def decode_message(image: Image, target_reds: list, total_pixel_ct: int) -> str:
             else:
                 break
 
-        if len(header) == 256:
+        if len(header) == 512:
             break
 
-    size_hash = header[:128]
-    data_hash = header[128:]
+    size_hash = header[:256]
+    data_hash = header[256:]
 
     log.debug(f"Extracted size: {size_hash} (length: {len(size_hash)} bits)")
     log.debug(f"Extracted data hash: {data_hash} (length: {len(data_hash)} bits)")
