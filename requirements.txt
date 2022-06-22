@@ -1,5 +1,5 @@
 coloredlogs==10.0
 humanfriendly==4.18
-numpy==1.17.3
+numpy==1.22.0
 Pillow==6.2.1
 tqdm==4.37.0
